@@ -1,97 +1,140 @@
-# Azure Secret Expiration Monitor
+# Azure Secret Expiration Monitor (Windows on-prem GUI)
 
-Monitors Azure secret expirations and sends notifications. Two equivalent
-implementations are provided:
+A Windows Server desktop application that scans Azure for expiring secrets and
+sends notifications. Runs **on-premises** — no cloud hosting required. Uses a
+service principal (client ID + secret) to talk to Azure; the secret is
+encrypted on disk with Windows DPAPI.
 
-| Path | Stack | Best for |
-|---|---|---|
-| `python/azure_secret_monitor.py` | Python 3.10+, `azure-identity` | Linux/CI, containers, cron, GitHub Actions |
-| `powershell/Monitor-AzureSecrets.ps1` | PowerShell 7+, `Az` modules | Windows admins, Azure Automation runbooks |
+```
++------------------+        +-----------------------+        +---------------------+
+|  Windows Server  |   -->  |  Microsoft Graph API  |  -->   | App registrations    |
+|  (this app)      |        |  Azure Key Vault API  |        | Key Vault items     |
++------------------+        +-----------------------+        +---------------------+
+          |
+          v
+   Teams webhook / SMTP email
+```
 
 ## What it scans
 
-- **Entra ID (Azure AD) app registrations** – client secrets and certificate
-  credentials on every application the identity can read.
-- **Azure Key Vault** – secrets, keys, and certificates in each named vault
-  (only items that have an explicit expiration are reported).
+- **Entra ID app registrations** — client secrets + certificate credentials.
+- **Azure Key Vault** — secrets, keys, and certificates with an `expiresOn`.
 
-For every credential it computes days remaining and assigns a status:
+Each credential is bucketed:
 
 | Status | Meaning |
 |---|---|
-| `EXPIRED` | Already past `expiresOn`. |
-| `CRITICAL` | Expires within 7 days. |
-| `WARNING` | Expires within 30 days. |
-| `OK` | Beyond 30 days (only shown with `include_ok`). |
+| `EXPIRED` | Already past expiration. |
+| `CRITICAL` | ≤ 7 days remaining. |
+| `WARNING` | ≤ 30 days remaining (configurable). |
+| `OK` | Outside the threshold window. |
 
-## Notifications
-
-- Console table (always)
-- Microsoft Teams via Incoming Webhook
-- SMTP email (HTML + plain text)
-
-Exit code: `0` clean, `1` items in window, `2` something already expired —
-useful for CI gating.
+Notifications fire only when an item's severity **rises** (e.g. WARNING →
+CRITICAL), so the same alert doesn't spam every day. State is kept in
+`%APPDATA%\AzureSecretMonitor\state.json`.
 
 ---
 
-## Python
+## Prerequisites (Windows Server)
 
-```bash
-cd python
+1. **Python 3.10+** for Windows (tkinter is included in the standard installer).
+2. An **Entra ID app registration** to act as the service principal:
+   - API permissions (Microsoft Graph, application type):
+     `Application.Read.All` — granted with admin consent.
+   - For each Key Vault you want to scan, grant the service principal
+     `Key Vault Reader` plus a data role that allows listing:
+     `Key Vault Secrets User`, `Key Vault Crypto User`, `Key Vault Certificate User`
+     (or use Vault Access Policies with `get`+`list` on secrets/keys/certificates).
+   - Create a **client secret** for the app registration — copy its value.
+
+## Install
+
+```powershell
+git clone <this repo>
+cd Netanel_new\python
 pip install -r requirements.txt
-cp config.example.yaml config.yaml   # edit vault names, email, webhook
-az login                              # or set AZURE_CLIENT_ID/SECRET/TENANT
-python azure_secret_monitor.py -c config.yaml
 ```
 
-Common flags:
+## Run the GUI
 
-```bash
-python azure_secret_monitor.py --dry-run         # don't send anything
-python azure_secret_monitor.py --json            # machine-readable output
-python azure_secret_monitor.py -v                # debug logging
-```
-
-Auth uses `DefaultAzureCredential`, so it picks up (in order): env vars,
-managed identity, Azure CLI login, VS Code login, etc.
-
-### Permissions required
-
-- Microsoft Graph: `Application.Read.All` (delegated or app)
-- Key Vault: `get` + `list` on secrets, keys, and certificates (RBAC role
-  `Key Vault Reader` plus `Key Vault Secrets User` is enough for read-only
-  metadata)
-
----
-
-## PowerShell
+Double-click `windows\Start-Monitor.bat`, or:
 
 ```powershell
-Install-Module Az -Scope CurrentUser
-Connect-AzAccount
-
-./powershell/Monitor-AzureSecrets.ps1 `
-    -KeyVault 'prod-kv','shared-kv' `
-    -ThresholdDays 45 `
-    -TeamsWebhook 'https://outlook.office.com/webhook/...'
+cd python
+python gui.py
 ```
 
-To send email instead/also:
+The window has four tabs:
+
+- **Dashboard** — color-coded table of every credential in scope, with
+  "Scan now", "Send test Teams", "Send test email".
+- **Azure** — tenant ID, client ID, client secret, key vault names,
+  threshold days, app-registration toggle.
+- **Notifications** — Microsoft Teams webhook + SMTP settings.
+- **Scheduler** — enable in-app background scans on an interval, or install a
+  Windows Scheduled Task that runs unattended.
+
+Click **Save** in any tab to persist. Sensitive fields (client secret, SMTP
+password) are encrypted with **DPAPI under the current Windows user** before
+being written to `%APPDATA%\AzureSecretMonitor\secret.bin` /  `smtp.bin`.
+Other users on the same server cannot decrypt them.
+
+## Run unattended (Windows Scheduled Task)
+
+After configuring + saving via the GUI, open the **Scheduler** tab and click
+"Install Scheduled Task...", or run the installer directly:
 
 ```powershell
-$cred = Get-Credential
-./Monitor-AzureSecrets.ps1 -KeyVault prod-kv `
-    -SmtpHost smtp.office365.com -From alerts@contoso.com `
-    -To secops@contoso.com -SmtpCredential $cred
+powershell -ExecutionPolicy Bypass -File windows\Install-ScheduledTask.ps1 -Time 07:30
 ```
 
----
+This registers a task named `AzureSecretMonitor` that runs `cli.py` daily as
+the current user (so it can decrypt the DPAPI-protected secret). Logs go to
+`%ProgramData%\AzureSecretMonitor\logs\cli.log`.
 
-## Scheduling
+The CLI exit code reflects severity (useful if you want to chain other tasks):
 
-- **GitHub Actions / Azure DevOps**: run the Python script on `schedule:` cron;
-  authenticate with OIDC federated credentials.
-- **Azure Automation**: import the PowerShell script as a runbook and use the
-  account's system-assigned Managed Identity.
-- **cron / Task Scheduler**: any host with the right credentials works.
+- `0` — clean (nothing in window)
+- `1` — items in the threshold window
+- `2` — at least one item already expired
+- `3` — configuration missing (run the GUI first)
+
+## File layout
+
+```
+python/
+  gui.py            # tkinter GUI (entry point for desktop use)
+  cli.py            # headless run (used by the Scheduled Task)
+  core.py           # scanning + notifications (no UI imports)
+  config_store.py   # DPAPI-encrypted config / state on disk
+  requirements.txt
+windows/
+  Start-Monitor.bat       # launches the GUI
+  Install-ScheduledTask.ps1
+powershell/
+  Monitor-AzureSecrets.ps1   # alternative pure-PowerShell scanner
+```
+
+## Where settings live
+
+```
+%APPDATA%\AzureSecretMonitor\
+  config.json    # non-sensitive settings (tenant/client IDs, vaults, etc.)
+  secret.bin     # client secret, DPAPI-encrypted (CurrentUser)
+  smtp.bin       # SMTP password, DPAPI-encrypted (CurrentUser)
+  state.json     # last-notified severity per item (alert deduplication)
+```
+
+Logs (Scheduled Task runs only): `%ProgramData%\AzureSecretMonitor\logs\cli.log`.
+
+## Troubleshooting
+
+- **"Configuration incomplete"** from the CLI: run the GUI once on the same
+  Windows account, save the settings, then re-trigger the task.
+- **Scheduled Task fails to read the secret**: the task must run under the
+  same user account that saved the secret in the GUI. DPAPI keys are tied to
+  the Windows user profile.
+- **Graph 403 on `applications`**: the service principal needs
+  `Application.Read.All` with admin consent.
+- **Key Vault 403**: assign `Key Vault Reader` + the relevant data role(s),
+  or add the SP to the vault's access policies with `get`+`list` permissions.
