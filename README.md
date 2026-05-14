@@ -5,6 +5,33 @@ sends notifications. Runs **on-premises** — no cloud hosting required. Uses a
 service principal (client ID + secret) to talk to Azure; the secret is
 encrypted on disk with Windows DPAPI.
 
+## Screenshots
+
+### Dashboard
+Color-coded list of every credential in scope. Severity is computed from each
+item's `expiresOn`; the summary line in the top-right counts items per bucket.
+
+![Dashboard](docs/screenshots/dashboard.png)
+
+### Azure tab
+Service principal credentials, threshold window, and the list of Key Vaults to
+scan. The client secret entry is masked and stored DPAPI-encrypted.
+
+![Azure tab](docs/screenshots/azure.png)
+
+### Notifications tab
+Microsoft Teams Incoming Webhook plus SMTP email settings. The SMTP password
+is also DPAPI-encrypted on save.
+
+![Notifications tab](docs/screenshots/notifications.png)
+
+### Scheduler tab
+Toggle in-app background scans, or click "Install Scheduled Task..." to
+register a Windows daily task that runs `cli.py` unattended.
+
+![Scheduler tab](docs/screenshots/scheduler.png)
+
+
 ```
 +------------------+        +-----------------------+        +---------------------+
 |  Windows Server  |   -->  |  Microsoft Graph API  |  -->   | App registrations    |
