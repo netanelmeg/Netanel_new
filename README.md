@@ -5,6 +5,8 @@ sends notifications. Runs **on-premises** — no cloud hosting required. Uses a
 service principal (client ID + secret) to talk to Azure; the secret is
 encrypted on disk with Windows DPAPI.
 
+**👉 New users: follow the step-by-step [Installation & Configuration Guide](docs/INSTALL.md).**
+
 ## Screenshots
 
 ### Dashboard

@@ -1,7 +1,8 @@
-"""Azure Secret Expiration Monitor — Windows GUI.
+"""Azure Secret Expiration Monitor — modern Windows GUI (ttkbootstrap).
 
-Tkinter-based GUI built for Windows Server. Loads/saves config to
-%APPDATA%\\AzureSecretMonitor and encrypts the client secret with DPAPI.
+Sidebar navigation, stat cards, themed widgets, and a light/dark switch.
+Logic is unchanged from the prior tkinter build — only the look-and-feel
+and layout are new.
 """
 
 from __future__ import annotations
@@ -12,7 +13,12 @@ import threading
 import time
 import tkinter as tk
 from datetime import datetime
-from tkinter import messagebox, ttk
+from tkinter import messagebox
+
+import ttkbootstrap as tb
+from ttkbootstrap.constants import (
+    BOTH, DANGER, END, INFO, LEFT, PRIMARY, RIGHT, SUCCESS, WARNING, X, Y,
+)
 
 import config_store
 from core import (
@@ -22,20 +28,27 @@ from core import (
 
 LOG = logging.getLogger("azure-secret-monitor.gui")
 
-STATUS_COLORS = {
-    "EXPIRED":  "#ffb3b3",
-    "CRITICAL": "#ffd6a5",
-    "WARNING":  "#fff3b0",
-    "OK":       "#d8f3dc",
+# Row colors for the Treeview (subtle tints; status badge column is the loud signal).
+ROW_COLORS = {
+    "EXPIRED":  "#fde2e2",
+    "CRITICAL": "#fde7cf",
+    "WARNING":  "#fff5cc",
+    "OK":       "#e3f4e1",
 }
+STATUS_STYLES = {
+    "EXPIRED":  "danger",
+    "CRITICAL": "warning",
+    "WARNING":  "warning",
+    "OK":       "success",
+}
+LIGHT_THEME = "cosmo"
+DARK_THEME = "darkly"
 
 
-class App(tk.Tk):
+class App(tb.Window):
     def __init__(self) -> None:
-        super().__init__()
-        self.title("Azure Secret Expiration Monitor")
-        self.geometry("1050x650")
-        self.minsize(900, 550)
+        super().__init__(themename=LIGHT_THEME, title="Azure Secret Monitor",
+                         size=(1180, 740), minsize=(1000, 620))
 
         self.cfg = config_store.load_config()
         if not self.cfg.smtp_password:
@@ -46,57 +59,186 @@ class App(tk.Tk):
         self._scan_thread: threading.Thread | None = None
         self._sched_thread: threading.Thread | None = None
         self._sched_stop = threading.Event()
+        self._page_frames: dict[str, tb.Frame] = {}
+        self._nav_buttons: dict[str, tb.Button] = {}
 
-        self._build_ui()
+        self._build_chrome()
+        self._build_pages()
+        self._show_page("dashboard")
         self._poll_events()
 
         if self.cfg.schedule_enabled:
             self._start_scheduler()
 
-    # ------------------------------------------------------------------ UI
+    # =====================================================================
+    # Chrome: header, sidebar, status bar
+    # =====================================================================
 
-    def _build_ui(self) -> None:
-        nb = ttk.Notebook(self)
-        nb.pack(fill="both", expand=True, padx=8, pady=(8, 0))
+    def _build_chrome(self) -> None:
+        # Header --------------------------------------------------------------
+        header = tb.Frame(self, padding=(20, 14))
+        header.pack(fill=X)
 
-        self._build_dashboard(nb)
-        self._build_azure_tab(nb)
-        self._build_notifications_tab(nb)
-        self._build_schedule_tab(nb)
+        title_box = tb.Frame(header)
+        title_box.pack(side=LEFT)
+        tb.Label(title_box, text="Azure Secret Monitor",
+                 font=("Segoe UI Semibold", 18)).pack(anchor="w")
+        tb.Label(title_box, text="On-prem expiration tracking for Entra ID and Key Vault",
+                 font=("Segoe UI", 10), bootstyle="secondary").pack(anchor="w")
 
-        self.status_var = tk.StringVar(value="Idle.")
-        ttk.Label(self, textvariable=self.status_var, anchor="w",
-                  relief="sunken").pack(fill="x", side="bottom", padx=8, pady=4)
+        actions = tb.Frame(header)
+        actions.pack(side=RIGHT)
+        self.theme_btn = tb.Button(actions, text="🌙 Dark", width=10,
+                                   bootstyle="secondary-outline", command=self._toggle_theme)
+        self.theme_btn.pack(side=RIGHT, padx=(8, 0))
+        self.scan_btn = tb.Button(actions, text="▶  Scan now",
+                                  bootstyle=PRIMARY, command=self.scan_now, width=14)
+        self.scan_btn.pack(side=RIGHT)
 
-    def _build_dashboard(self, nb: ttk.Notebook) -> None:
-        frame = ttk.Frame(nb, padding=8)
-        nb.add(frame, text="Dashboard")
+        tb.Separator(self).pack(fill=X)
 
-        bar = ttk.Frame(frame); bar.pack(fill="x", pady=(0, 8))
-        ttk.Button(bar, text="Scan now", command=self.scan_now).pack(side="left")
-        ttk.Button(bar, text="Send test Teams", command=self.test_teams).pack(side="left", padx=4)
-        ttk.Button(bar, text="Send test email", command=self.test_email).pack(side="left", padx=4)
+        # Body: sidebar + content --------------------------------------------
+        body = tb.Frame(self)
+        body.pack(fill=BOTH, expand=True)
 
-        self.summary_var = tk.StringVar(value="No scan yet.")
-        ttk.Label(bar, textvariable=self.summary_var).pack(side="right")
+        self.sidebar = tb.Frame(body, padding=(12, 16), width=210)
+        self.sidebar.pack(side=LEFT, fill=Y)
+        self.sidebar.pack_propagate(False)
+
+        for key, label, icon in [
+            ("dashboard",     "Dashboard",     "📊"),
+            ("azure",         "Azure",         "☁"),
+            ("notifications", "Notifications", "🔔"),
+            ("scheduler",     "Scheduler",     "⏱"),
+        ]:
+            btn = tb.Button(self.sidebar, text=f"  {icon}   {label}",
+                            bootstyle="secondary-link", width=20,
+                            command=lambda k=key: self._show_page(k))
+            btn.pack(fill=X, pady=2)
+            self._nav_buttons[key] = btn
+
+        tb.Separator(body, orient="vertical").pack(side=LEFT, fill=Y)
+
+        self.content = tb.Frame(body, padding=20)
+        self.content.pack(side=LEFT, fill=BOTH, expand=True)
+
+        # Status bar ---------------------------------------------------------
+        tb.Separator(self).pack(fill=X)
+        bar = tb.Frame(self, padding=(20, 8))
+        bar.pack(fill=X)
+        self.status_var = tk.StringVar(value="● Idle.")
+        tb.Label(bar, textvariable=self.status_var,
+                 bootstyle="secondary").pack(side=LEFT)
+        self.cfg_path_var = tk.StringVar(value=f"Config: {config_store.config_dir()}")
+        tb.Label(bar, textvariable=self.cfg_path_var,
+                 bootstyle="secondary").pack(side=RIGHT)
+
+    def _show_page(self, key: str) -> None:
+        for k, frame in self._page_frames.items():
+            frame.pack_forget()
+        self._page_frames[key].pack(fill=BOTH, expand=True)
+        for k, btn in self._nav_buttons.items():
+            btn.configure(bootstyle=("primary" if k == key else "secondary-link"))
+
+    def _toggle_theme(self) -> None:
+        current = self.style.theme.name
+        new = DARK_THEME if current == LIGHT_THEME else LIGHT_THEME
+        self.style.theme_use(new)
+        self.theme_btn.configure(text="☀ Light" if new == DARK_THEME else "🌙 Dark")
+
+    # =====================================================================
+    # Pages
+    # =====================================================================
+
+    def _build_pages(self) -> None:
+        self._page_frames["dashboard"]     = self._build_dashboard()
+        self._page_frames["azure"]         = self._build_azure_page()
+        self._page_frames["notifications"] = self._build_notifications_page()
+        self._page_frames["scheduler"]     = self._build_scheduler_page()
+
+    # ---------- Dashboard ------------------------------------------------
+
+    def _build_dashboard(self) -> tb.Frame:
+        f = tb.Frame(self.content)
+
+        # Stat cards
+        cards = tb.Frame(f)
+        cards.pack(fill=X, pady=(0, 16))
+        self.stat_vars = {
+            "EXPIRED":  tk.StringVar(value="0"),
+            "CRITICAL": tk.StringVar(value="0"),
+            "WARNING":  tk.StringVar(value="0"),
+            "OK":       tk.StringVar(value="0"),
+        }
+        for i, (key, label, style) in enumerate([
+            ("EXPIRED",  "Expired",  DANGER),
+            ("CRITICAL", "Critical (≤7d)", WARNING),
+            ("WARNING",  "Warning (≤30d)", WARNING),
+            ("OK",       "Healthy",  SUCCESS),
+        ]):
+            card = tb.Labelframe(cards, text=f"  {label}  ",
+                                 bootstyle=style, padding=(16, 10))
+            card.grid(row=0, column=i, padx=(0 if i == 0 else 12, 0), sticky="we")
+            cards.columnconfigure(i, weight=1)
+            tb.Label(card, textvariable=self.stat_vars[key],
+                     font=("Segoe UI Semibold", 26)).pack(anchor="w")
+
+        # Toolbar
+        bar = tb.Frame(f)
+        bar.pack(fill=X, pady=(0, 8))
+        tb.Button(bar, text="🔄  Rescan", bootstyle="primary-outline",
+                  command=self.scan_now).pack(side=LEFT)
+        tb.Button(bar, text="✉  Test email", bootstyle="secondary-outline",
+                  command=self.test_email).pack(side=LEFT, padx=8)
+        tb.Button(bar, text="💬  Test Teams", bootstyle="secondary-outline",
+                  command=self.test_teams).pack(side=LEFT)
+
+        tb.Label(bar, text="Filter:", bootstyle="secondary").pack(side=LEFT, padx=(24, 6))
+        self.filter_var = tk.StringVar()
+        self.filter_var.trace_add("write", lambda *a: self._apply_filter())
+        tb.Entry(bar, textvariable=self.filter_var, width=28).pack(side=LEFT)
+
+        self.last_scan_var = tk.StringVar(value="No scan yet")
+        tb.Label(bar, textvariable=self.last_scan_var,
+                 bootstyle="secondary").pack(side=RIGHT)
+
+        # Treeview
+        wrap = tb.Frame(f)
+        wrap.pack(fill=BOTH, expand=True)
 
         cols = ("status", "days", "source", "kind", "container", "name", "expires")
-        self.tree = ttk.Treeview(frame, columns=cols, show="headings")
-        widths = {"status": 90, "days": 60, "source": 130, "kind": 110,
-                  "container": 240, "name": 240, "expires": 150}
-        for c in cols:
-            self.tree.heading(c, text=c.capitalize())
-            self.tree.column(c, width=widths[c], anchor="w")
-        for status, color in STATUS_COLORS.items():
+        self.tree = tb.Treeview(wrap, columns=cols, show="headings",
+                                bootstyle=INFO, height=18)
+        headings = [("status", "Status", 90), ("days", "Days", 70),
+                    ("source", "Source", 140), ("kind", "Kind", 110),
+                    ("container", "Container", 240), ("name", "Name", 240),
+                    ("expires", "Expires (UTC)", 150)]
+        for col, text, w in headings:
+            self.tree.heading(col, text=text)
+            self.tree.column(col, width=w, anchor="w")
+        for status, color in ROW_COLORS.items():
             self.tree.tag_configure(status, background=color)
-        vsb = ttk.Scrollbar(frame, orient="vertical", command=self.tree.yview)
+        vsb = tb.Scrollbar(wrap, orient="vertical", command=self.tree.yview,
+                           bootstyle="secondary-round")
         self.tree.configure(yscrollcommand=vsb.set)
-        self.tree.pack(side="left", fill="both", expand=True)
-        vsb.pack(side="right", fill="y")
+        self.tree.pack(side=LEFT, fill=BOTH, expand=True)
+        vsb.pack(side=RIGHT, fill=Y)
 
-    def _build_azure_tab(self, nb: ttk.Notebook) -> None:
-        frame = ttk.Frame(nb, padding=12)
-        nb.add(frame, text="Azure")
+        return f
+
+    # ---------- Azure ----------------------------------------------------
+
+    def _build_azure_page(self) -> tb.Frame:
+        f = tb.Frame(self.content)
+
+        tb.Label(f, text="Azure connection",
+                 font=("Segoe UI Semibold", 14)).pack(anchor="w")
+        tb.Label(f, text="Service principal credentials used to call Microsoft Graph and Key Vault.",
+                 bootstyle="secondary").pack(anchor="w", pady=(0, 14))
+
+        card = tb.Labelframe(f, text="  Service principal  ",
+                             bootstyle="primary", padding=18)
+        card.pack(fill=X, pady=(0, 16))
 
         self.tenant_var = tk.StringVar(value=self.cfg.tenant_id)
         self.client_id_var = tk.StringVar(value=self.cfg.client_id)
@@ -105,28 +247,45 @@ class App(tk.Tk):
         self.app_reg_var = tk.BooleanVar(value=self.cfg.scan_app_registrations)
         self.include_ok_var = tk.BooleanVar(value=self.cfg.include_ok)
 
-        self._row(frame, 0, "Tenant ID", self.tenant_var)
-        self._row(frame, 1, "Client ID", self.client_id_var)
-        self._row(frame, 2, "Client secret", self.client_secret_var, show="*")
-        self._row(frame, 3, "Threshold (days)", self.threshold_var, width=10)
+        self._labeled(card, 0, "Tenant ID", self.tenant_var)
+        self._labeled(card, 1, "Client ID", self.client_id_var)
+        self._labeled(card, 2, "Client secret", self.client_secret_var, show="●")
+        card.columnconfigure(1, weight=1)
 
-        ttk.Checkbutton(frame, text="Scan Entra ID app registrations",
-                        variable=self.app_reg_var).grid(row=4, column=1, sticky="w", pady=4)
-        ttk.Checkbutton(frame, text="Include healthy items (OK) in dashboard",
-                        variable=self.include_ok_var).grid(row=5, column=1, sticky="w", pady=4)
+        scope = tb.Labelframe(f, text="  Scan scope  ",
+                              bootstyle="info", padding=18)
+        scope.pack(fill=BOTH, expand=True)
 
-        ttk.Label(frame, text="Key Vaults (one per line):").grid(row=6, column=0, sticky="nw", pady=(8, 4))
-        self.vaults_text = tk.Text(frame, width=60, height=8)
-        self.vaults_text.grid(row=6, column=1, sticky="we", pady=(8, 4))
+        self._labeled(scope, 0, "Threshold (days)", self.threshold_var, width=10)
+        tb.Checkbutton(scope, text="Scan Entra ID app registrations",
+                       variable=self.app_reg_var,
+                       bootstyle="success-round-toggle").grid(
+                           row=1, column=1, sticky="w", pady=8)
+        tb.Checkbutton(scope, text="Show healthy items (OK) on dashboard",
+                       variable=self.include_ok_var,
+                       bootstyle="success-round-toggle").grid(
+                           row=2, column=1, sticky="w", pady=4)
+
+        tb.Label(scope, text="Key Vaults (one per line):").grid(
+            row=3, column=0, sticky="nw", padx=(0, 12), pady=(12, 4))
+        self.vaults_text = tk.Text(scope, height=8, font=("Consolas", 10),
+                                   relief="solid", borderwidth=1)
+        self.vaults_text.grid(row=3, column=1, sticky="we", pady=(12, 4))
         self.vaults_text.insert("1.0", "\n".join(self.cfg.key_vaults))
+        scope.columnconfigure(1, weight=1)
 
-        frame.columnconfigure(1, weight=1)
-        ttk.Button(frame, text="Save", command=self.save_settings).grid(
-            row=10, column=1, sticky="e", pady=(16, 0))
+        tb.Button(f, text="💾  Save settings", bootstyle=SUCCESS,
+                  command=self.save_settings).pack(anchor="e", pady=(16, 0))
+        return f
 
-    def _build_notifications_tab(self, nb: ttk.Notebook) -> None:
-        frame = ttk.Frame(nb, padding=12)
-        nb.add(frame, text="Notifications")
+    # ---------- Notifications -------------------------------------------
+
+    def _build_notifications_page(self) -> tb.Frame:
+        f = tb.Frame(self.content)
+        tb.Label(f, text="Notifications",
+                 font=("Segoe UI Semibold", 14)).pack(anchor="w")
+        tb.Label(f, text="Alerts fire only when severity rises (e.g. WARNING → CRITICAL).",
+                 bootstyle="secondary").pack(anchor="w", pady=(0, 14))
 
         self.teams_var = tk.StringVar(value=self.cfg.teams_webhook)
         self.smtp_host_var = tk.StringVar(value=self.cfg.smtp_host)
@@ -138,55 +297,81 @@ class App(tk.Tk):
         self.email_to_var = tk.StringVar(value=self.cfg.email_to)
         self.email_subject_var = tk.StringVar(value=self.cfg.email_subject)
 
-        ttk.Label(frame, text="Microsoft Teams").grid(row=0, column=0, columnspan=2, sticky="w")
-        self._row(frame, 1, "Webhook URL", self.teams_var)
+        teams = tb.Labelframe(f, text="  Microsoft Teams  ",
+                              bootstyle="primary", padding=18)
+        teams.pack(fill=X, pady=(0, 14))
+        self._labeled(teams, 0, "Incoming webhook URL", self.teams_var)
+        teams.columnconfigure(1, weight=1)
 
-        ttk.Separator(frame).grid(row=2, column=0, columnspan=2, sticky="we", pady=10)
-        ttk.Label(frame, text="SMTP email").grid(row=3, column=0, columnspan=2, sticky="w")
-        self._row(frame, 4, "SMTP host", self.smtp_host_var)
-        self._row(frame, 5, "SMTP port", self.smtp_port_var, width=10)
-        ttk.Checkbutton(frame, text="Use STARTTLS",
-                        variable=self.smtp_starttls_var).grid(row=6, column=1, sticky="w", pady=4)
-        self._row(frame, 7, "Username", self.smtp_user_var)
-        self._row(frame, 8, "Password", self.smtp_pwd_var, show="*")
-        self._row(frame, 9, "From",     self.email_from_var)
-        self._row(frame, 10, "To (comma-separated)", self.email_to_var)
-        self._row(frame, 11, "Subject", self.email_subject_var)
+        email = tb.Labelframe(f, text="  SMTP email  ",
+                              bootstyle="primary", padding=18)
+        email.pack(fill=X)
+        self._labeled(email, 0, "SMTP host",  self.smtp_host_var)
+        self._labeled(email, 1, "SMTP port",  self.smtp_port_var, width=10)
+        tb.Checkbutton(email, text="Use STARTTLS", variable=self.smtp_starttls_var,
+                       bootstyle="success-round-toggle").grid(
+                           row=2, column=1, sticky="w", pady=4)
+        self._labeled(email, 3, "Username",   self.smtp_user_var)
+        self._labeled(email, 4, "Password",   self.smtp_pwd_var, show="●")
+        self._labeled(email, 5, "From",       self.email_from_var)
+        self._labeled(email, 6, "To (comma-separated)", self.email_to_var)
+        self._labeled(email, 7, "Subject",    self.email_subject_var)
+        email.columnconfigure(1, weight=1)
 
-        frame.columnconfigure(1, weight=1)
-        ttk.Button(frame, text="Save", command=self.save_settings).grid(
-            row=12, column=1, sticky="e", pady=(16, 0))
+        tb.Button(f, text="💾  Save settings", bootstyle=SUCCESS,
+                  command=self.save_settings).pack(anchor="e", pady=(16, 0))
+        return f
 
-    def _build_schedule_tab(self, nb: ttk.Notebook) -> None:
-        frame = ttk.Frame(nb, padding=12)
-        nb.add(frame, text="Scheduler")
+    # ---------- Scheduler -----------------------------------------------
+
+    def _build_scheduler_page(self) -> tb.Frame:
+        f = tb.Frame(self.content)
+        tb.Label(f, text="Scheduler",
+                 font=("Segoe UI Semibold", 14)).pack(anchor="w")
+        tb.Label(f, text="Run scans on an interval, or install a Windows Scheduled Task for unattended runs.",
+                 bootstyle="secondary").pack(anchor="w", pady=(0, 14))
 
         self.sched_on_var = tk.BooleanVar(value=self.cfg.schedule_enabled)
         self.sched_hours_var = tk.IntVar(value=self.cfg.schedule_interval_hours)
 
-        ttk.Checkbutton(frame, text="Run scans in the background while this app is open",
-                        variable=self.sched_on_var).grid(row=0, column=0, columnspan=2, sticky="w")
-        self._row(frame, 1, "Interval (hours)", self.sched_hours_var, width=10)
+        inapp = tb.Labelframe(f, text="  In-app background scan  ",
+                              bootstyle="info", padding=18)
+        inapp.pack(fill=X, pady=(0, 14))
+        tb.Checkbutton(inapp, text="Run scans while this app window stays open",
+                       variable=self.sched_on_var,
+                       bootstyle="success-round-toggle").grid(
+                           row=0, column=0, columnspan=2, sticky="w")
+        self._labeled(inapp, 1, "Interval (hours)", self.sched_hours_var, width=10)
 
-        info = (
-            "To run unattended on this server, click 'Install Scheduled Task' below.\n"
-            "It registers a Windows task that runs cli.py daily under the current user."
-        )
-        ttk.Label(frame, text=info, foreground="#555").grid(
-            row=2, column=0, columnspan=2, sticky="w", pady=(12, 4))
-        ttk.Button(frame, text="Install Scheduled Task...",
-                   command=self.install_scheduled_task).grid(row=3, column=0, sticky="w", pady=4)
+        task = tb.Labelframe(f, text="  Windows Scheduled Task  ",
+                             bootstyle="primary", padding=18)
+        task.pack(fill=X)
+        tb.Label(task, wraplength=720, justify="left", text=(
+            "Registers a daily task named 'AzureSecretMonitor' that runs cli.py under "
+            "the current Windows user (required so DPAPI can decrypt the stored client "
+            "secret). Logs go to %ProgramData%\\AzureSecretMonitor\\logs\\cli.log."
+        )).pack(anchor="w", pady=(0, 10))
+        tb.Button(task, text="📅  Install Scheduled Task…", bootstyle=PRIMARY,
+                  command=self.install_scheduled_task).pack(anchor="w")
 
-        ttk.Button(frame, text="Save", command=self.save_settings).grid(
-            row=10, column=1, sticky="e", pady=(16, 0))
+        tb.Button(f, text="💾  Save settings", bootstyle=SUCCESS,
+                  command=self.save_settings).pack(anchor="e", pady=(16, 0))
+        return f
 
-    def _row(self, parent, row, label, var, width=50, show=None):
-        ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", padx=(0, 8), pady=4)
-        entry = ttk.Entry(parent, textvariable=var, width=width, show=show)
-        entry.grid(row=row, column=1, sticky="we", pady=4)
+    # =====================================================================
+    # Helpers
+    # =====================================================================
+
+    def _labeled(self, parent, row, label, var, width=46, show=None) -> tb.Entry:
+        tb.Label(parent, text=label).grid(row=row, column=0, sticky="w",
+                                          padx=(0, 12), pady=6)
+        entry = tb.Entry(parent, textvariable=var, width=width, show=show)
+        entry.grid(row=row, column=1, sticky="we", pady=6)
         return entry
 
-    # ---------------------------------------------------------------- actions
+    # =====================================================================
+    # Actions (unchanged behavior from the prior build)
+    # =====================================================================
 
     def _gather_settings(self) -> AppConfig:
         vaults = [v.strip() for v in self.vaults_text.get("1.0", "end").splitlines() if v.strip()]
@@ -206,7 +391,8 @@ class App(tk.Tk):
         self.cfg.smtp_password = self.smtp_pwd_var.get()
         self.cfg.email_from = self.email_from_var.get().strip()
         self.cfg.email_to = self.email_to_var.get().strip()
-        self.cfg.email_subject = self.email_subject_var.get().strip() or "[Azure] Secret expiration report"
+        self.cfg.email_subject = (self.email_subject_var.get().strip()
+                                  or "[Azure] Secret expiration report")
 
         self.cfg.schedule_enabled = bool(self.sched_on_var.get())
         self.cfg.schedule_interval_hours = max(1, int(self.sched_hours_var.get() or 24))
@@ -220,7 +406,7 @@ class App(tk.Tk):
             messagebox.showerror("Save failed", str(exc))
             return
         self._restart_scheduler()
-        self.status_var.set(f"Settings saved to {config_store.config_dir()}")
+        self.status_var.set(f"● Settings saved to {config_store.config_dir()}")
 
     def scan_now(self) -> None:
         if self._scan_thread and self._scan_thread.is_alive():
@@ -230,7 +416,7 @@ class App(tk.Tk):
         if errors:
             messagebox.showerror("Configuration incomplete", "\n".join(errors))
             return
-        self.status_var.set("Scanning...")
+        self.status_var.set("● Scanning…")
         self._scan_thread = threading.Thread(
             target=self._do_scan, args=(cfg, True), daemon=True)
         self._scan_thread.start()
@@ -257,10 +443,10 @@ class App(tk.Tk):
                             self.event_queue.put(("status", f"Email failed: {exc}"))
                 config_store.save_state(state)
             self.event_queue.put(("status",
-                f"Scan complete at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"))
+                f"● Scan complete at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"))
         except Exception as exc:
             LOG.exception("Scan failed")
-            self.event_queue.put(("status", f"Scan failed: {exc}"))
+            self.event_queue.put(("status", f"● Scan failed: {exc}"))
 
     def test_teams(self) -> None:
         cfg = self._gather_settings()
@@ -325,7 +511,6 @@ class App(tk.Tk):
             cfg = self.cfg
             if not cfg.validate_for_scan():
                 self._do_scan(cfg, True)
-            # Sleep in small chunks so we can stop quickly on settings change.
             for _ in range(interval):
                 if self._sched_stop.is_set():
                     return
@@ -338,7 +523,7 @@ class App(tk.Tk):
             while True:
                 kind, payload = self.event_queue.get_nowait()
                 if kind == "status":
-                    self.status_var.set(payload)
+                    self.status_var.set("● " + payload if not payload.startswith("●") else payload)
                 elif kind == "items":
                     self._render_items(payload)
         except queue.Empty:
@@ -347,21 +532,26 @@ class App(tk.Tk):
 
     def _render_items(self, items: list[ExpiringItem]) -> None:
         self.items = items
-        self.tree.delete(*self.tree.get_children())
+        self._apply_filter()
         counts = {"EXPIRED": 0, "CRITICAL": 0, "WARNING": 0, "OK": 0}
         for i in items:
             counts[i.status] = counts.get(i.status, 0) + 1
-            self.tree.insert("", "end", values=(
+        for k, v in counts.items():
+            self.stat_vars[k].set(str(v))
+        self.last_scan_var.set(f"Last scan: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
+    def _apply_filter(self) -> None:
+        needle = (self.filter_var.get() if hasattr(self, "filter_var") else "").lower().strip()
+        self.tree.delete(*self.tree.get_children())
+        for i in self.items:
+            if needle:
+                hay = " ".join([i.source, i.kind, i.container, i.name, i.status]).lower()
+                if needle not in hay:
+                    continue
+            self.tree.insert("", END, values=(
                 i.status, i.days_remaining, i.source, i.kind,
                 i.container, i.name, i.expires_on.strftime("%Y-%m-%d %H:%M"),
             ), tags=(i.status,))
-        self.summary_var.set(
-            f"Expired: {counts['EXPIRED']}   "
-            f"Critical: {counts['CRITICAL']}   "
-            f"Warning: {counts['WARNING']}   "
-            f"OK: {counts['OK']}   "
-            f"Total: {len(items)}"
-        )
 
 
 def main() -> None:

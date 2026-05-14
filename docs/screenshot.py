@@ -118,17 +118,13 @@ def main() -> None:
     app.update_idletasks()
     app.update()
 
-    nb = app.children[next(iter(app.children))]   # first child is the Notebook
-    tabs = ["dashboard", "azure", "notifications", "scheduler"]
-    for idx, name in enumerate(tabs):
-        nb.select(idx)
+    for name in ["dashboard", "azure", "notifications", "scheduler"]:
+        app._show_page(name)
         app.update_idletasks()
         app.update()
-        # Give Xvfb a moment to settle
-        app.after(150)
+        app.after(200)
         app.update()
-        wid = hex(app.winfo_id())
-        capture(wid, name)
+        capture(hex(app.winfo_id()), name)
 
     app.destroy()
 

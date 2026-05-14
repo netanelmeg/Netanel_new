@@ -4,3 +4,4 @@ azure-keyvault-keys>=4.9.0
 azure-keyvault-certificates>=4.8.0
 msgraph-core>=1.1.0
 requests>=2.32.0
+ttkbootstrap>=1.10.1
