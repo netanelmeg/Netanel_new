@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import smtplib
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -85,13 +86,52 @@ class AppConfig:
         errors = []
         if not self.tenant_id:
             errors.append("Tenant ID is required.")
+        elif not _is_uuid(self.tenant_id):
+            errors.append("Tenant ID must be a GUID (e.g. 11111111-2222-3333-4444-555555555555).")
         if not self.client_id:
             errors.append("Client ID is required.")
+        elif not _is_uuid(self.client_id):
+            errors.append("Client ID must be a GUID.")
         if not self.client_secret:
             errors.append("Client secret is required.")
         if not self.scan_app_registrations and not self.key_vaults:
             errors.append("Enable App Registration scanning or add at least one Key Vault.")
+        for v in self.key_vaults:
+            if not _is_valid_vault_name(v):
+                errors.append(f"Invalid Key Vault name: '{v}'. Names must be 3-24 chars, "
+                              "alphanumeric or hyphen.")
         return errors
+
+
+_UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+                      r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+_VAULT_RE = re.compile(r"^[a-zA-Z0-9](?:[a-zA-Z0-9-]{1,22}[a-zA-Z0-9])$")
+
+
+def _is_uuid(s: str) -> bool:
+    return bool(_UUID_RE.match(s.strip()))
+
+
+def _is_valid_vault_name(s: str) -> bool:
+    return bool(_VAULT_RE.match(s.strip()))
+
+
+def _odata_escape(s: str) -> str:
+    """Escape a value for safe inclusion inside an OData single-quoted string."""
+    return s.replace("'", "''")
+
+
+_HEADER_INJECTION = re.compile(r"[\r\n]")
+
+
+def _sanitize_header(value: str) -> str:
+    """Strip control chars that would let a setting break out of a header.
+
+    SMTP/MIME headers terminate at CRLF, so a stray newline in From/To/Subject
+    lets a writer inject arbitrary additional headers. Save-time validation
+    plus run-time sanitization are layered.
+    """
+    return _HEADER_INJECTION.sub(" ", value).strip()
 
 
 def make_credential(cfg: AppConfig) -> ClientSecretCredential:
@@ -149,6 +189,8 @@ def scan_app_registrations(credential: ClientSecretCredential,
 
 def scan_key_vault(vault_name: str, credential: ClientSecretCredential,
                    progress: ProgressCallback | None = None) -> list[ExpiringItem]:
+    if not _is_valid_vault_name(vault_name):
+        raise ValueError(f"Invalid Key Vault name: {vault_name!r}")
     if progress:
         progress(f"Scanning Key Vault: {vault_name}")
     LOG.info("Scanning Key Vault: %s", vault_name)
@@ -261,10 +303,17 @@ def render_html(items: list[ExpiringItem]) -> str:
 def notify_email(cfg: AppConfig, items: list[ExpiringItem]) -> None:
     if not (cfg.smtp_host and cfg.email_from and cfg.email_recipients()):
         return
+    subject = _sanitize_header(
+        cfg.email_subject or f"[Azure] {len(items)} secrets expiring soon")
+    sender = _sanitize_header(cfg.email_from)
+    recipients = [_sanitize_header(r) for r in cfg.email_recipients()]
+    if not sender or not recipients:
+        LOG.error("Refusing to send email: From or To became empty after sanitization.")
+        return
     msg = MIMEMultipart("alternative")
-    msg["Subject"] = cfg.email_subject or f"[Azure] {len(items)} secrets expiring soon"
-    msg["From"] = cfg.email_from
-    msg["To"] = ", ".join(cfg.email_recipients())
+    msg["Subject"] = subject
+    msg["From"] = sender
+    msg["To"] = ", ".join(recipients)
     msg.attach(MIMEText(render_console(items), "plain"))
     msg.attach(MIMEText(render_html(items), "html"))
 
@@ -275,7 +324,7 @@ def notify_email(cfg: AppConfig, items: list[ExpiringItem]) -> None:
             smtp.starttls()
         if cfg.smtp_username and password:
             smtp.login(cfg.smtp_username, password)
-        smtp.send_message(msg)
+        smtp.sendmail(sender, recipients, msg.as_string())
 
 
 def notify_teams(webhook_url: str, items: list[ExpiringItem]) -> None:
@@ -328,9 +377,12 @@ def add_app_password(credential: ClientSecretCredential, *,
 
 def find_app_object_id(credential: ClientSecretCredential, *, app_id: str) -> str:
     """Resolve an app registration's `appId` (client ID) to its object ID."""
+    if not _is_uuid(app_id):
+        raise ValueError(f"app_id must be a UUID, got: {app_id!r}")
     client = GraphClient(credential=credential)
+    safe_app_id = _odata_escape(app_id)
     url = (f"https://graph.microsoft.com/v1.0/applications"
-           f"?$filter=appId eq '{app_id}'&$select=id,appId")
+           f"?$filter=appId eq '{safe_app_id}'&$select=id,appId")
     resp = client.get(url)
     if resp.status_code >= 300:
         raise RuntimeError(f"applications lookup failed {resp.status_code}: {resp.text}")
@@ -383,18 +435,28 @@ def renew_keyvault_certificate_expiry(credential: ClientSecretCredential, *,
 
 # --- audit log --------------------------------------------------------------
 
+_AUDIT_MAX_DETAIL = 500
+
+
 def audit_event(log_path: str, *, actor: str, role: str, action: str,
                 target: str, success: bool, detail: str = "") -> None:
-    """Append a single JSON-line audit event."""
+    """Append a single JSON-line audit event.
+
+    `detail` is truncated to avoid accidentally persisting large error blobs
+    that could include sensitive material (tokens, full request bodies).
+    Callers should NEVER pass secret values to `detail`; this is only a
+    last-ditch cap.
+    """
     import json
+    safe_detail = (detail or "")[:_AUDIT_MAX_DETAIL].replace("\r", " ").replace("\n", " ")
     record = {
         "ts": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        "actor": actor,
-        "role": role,
-        "action": action,
-        "target": target,
-        "success": success,
-        "detail": detail,
+        "actor": actor[:80],
+        "role": role[:32],
+        "action": action[:64],
+        "target": target[:256],
+        "success": bool(success),
+        "detail": safe_detail,
     }
     try:
         os.makedirs(os.path.dirname(log_path), exist_ok=True)

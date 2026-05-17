@@ -1,13 +1,17 @@
 """On-disk config storage with Windows DPAPI encryption for the client secret.
 
-- Config lives in %APPDATA%\\AzureSecretMonitor\\ (or ~/.config/azure-secret-monitor
-  on non-Windows for dev/test).
-- `config.json` stores all non-sensitive fields.
-- `secret.bin` stores the client secret encrypted with DPAPI (CurrentUser scope)
-  on Windows. On other OSes it falls back to base64 with a clear warning so
-  the GUI is still runnable for development; on Windows Server you should
-  always run on Windows where the protection is real.
-- State (last-notified severity per item) lives in `state.json` next to config.
+- Per-user config lives in `%APPDATA%\\AzureSecretMonitor\\` (or
+  `~/.config/azure-secret-monitor` on non-Windows for dev/test).
+- `config.json` stores non-sensitive fields, `secret.bin` / `smtp.bin` store
+  the DPAPI-encrypted client secret and SMTP password.
+- `state.json` (per-user) deduplicates notifications across runs.
+
+- Machine-wide files live in `%ProgramData%\\AzureSecretMonitor\\` so they
+  cannot be bypassed by a non-admin user editing their own profile:
+    - `roles.json`   role assignments (writable only by OS Administrators)
+    - `logs\\audit.log`  append-only audit trail
+  The PowerShell helper `windows\\Initialize-Permissions.ps1` creates this
+  directory with the correct ACL.
 """
 
 from __future__ import annotations
@@ -17,6 +21,7 @@ import ctypes
 import json
 import logging
 import os
+import subprocess
 import sys
 from ctypes import wintypes
 from dataclasses import asdict
@@ -39,21 +44,53 @@ def config_dir() -> Path:
     return path
 
 
+def system_config_dir() -> Path:
+    """Machine-wide config, intentionally not under %APPDATA%.
+
+    On Windows this is %ProgramData%, which the Initialize-Permissions.ps1
+    helper ACLs so only Administrators can write to it.
+    """
+    if sys.platform == "win32":
+        base = os.environ.get("ProgramData") or r"C:\ProgramData"
+        path = Path(base) / APP_NAME
+    else:
+        path = Path("/var/lib/azure-secret-monitor")
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except PermissionError:
+        # Non-admin first launch — fall through; reads will work, writes won't.
+        pass
+    return path
+
+
 def config_path() -> Path: return config_dir() / "config.json"
 def secret_path() -> Path: return config_dir() / "secret.bin"
 def state_path() -> Path:  return config_dir() / "state.json"
-def roles_path() -> Path:  return config_dir() / "roles.json"
+
+
+def roles_path() -> Path:
+    """Machine-wide role assignments — writable only by Administrators."""
+    return system_config_dir() / "roles.json"
 
 
 def audit_log_path() -> Path:
-    """Machine-wide audit log; readable by anyone, writable by current user."""
-    if sys.platform == "win32":
-        base = os.environ.get("ProgramData") or r"C:\ProgramData"
-        path = Path(base) / APP_NAME / "logs"
-    else:
-        path = Path.home() / ".local" / "share" / "azure-secret-monitor" / "logs"
-    path.mkdir(parents=True, exist_ok=True)
+    """Machine-wide audit log."""
+    path = system_config_dir() / "logs"
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except PermissionError:
+        pass
     return path / "audit.log"
+
+
+def is_windows_admin() -> bool:
+    """Return True if running as a member of BUILTIN\\Administrators (Windows)."""
+    if sys.platform != "win32":
+        return os.geteuid() == 0  # convenient for non-Windows dev only
+    try:
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())  # type: ignore[attr-defined]
+    except Exception:
+        return False
 
 
 # --- DPAPI (Windows) --------------------------------------------------------
@@ -219,5 +256,13 @@ def load_roles() -> dict:
 
 def save_roles(roles: dict) -> None:
     rp = roles_path()
-    rp.write_text(json.dumps(roles, indent=2, sort_keys=True), encoding="utf-8")
+    try:
+        rp.write_text(json.dumps(roles, indent=2, sort_keys=True), encoding="utf-8")
+    except PermissionError as exc:
+        raise PermissionError(
+            f"Cannot write {rp}. The role file is restricted to Windows "
+            f"Administrators by design — re-launch the GUI as an Administrator "
+            f"to change role assignments, or run "
+            f"windows\\Initialize-Permissions.ps1 first."
+        ) from exc
     _restrict_perms(rp)

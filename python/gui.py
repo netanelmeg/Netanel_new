@@ -60,8 +60,12 @@ class App(tb.Window):
             self.cfg.smtp_password = config_store.load_smtp_password()
 
         self.roles = RoleAssignments.from_serializable(config_store.load_roles())
-        if perms.bootstrap_if_empty(self.roles):
-            config_store.save_roles(self.roles.to_serializable())
+        self.is_os_admin = config_store.is_windows_admin()
+        if perms.bootstrap_if_empty(self.roles, is_os_admin=self.is_os_admin):
+            try:
+                config_store.save_roles(self.roles.to_serializable())
+            except PermissionError as exc:
+                LOG.warning("Could not persist bootstrap role: %s", exc)
         self.current_user = perms.current_username()
         self.current_role: Role = self.roles.role_for(self.current_user)
 
@@ -487,6 +491,13 @@ class App(tb.Window):
     def _dlg_assign_user(self) -> None:
         if not perms.can(self.current_role, Permission.MANAGE_ROLES):
             return
+        if not self.is_os_admin:
+            messagebox.showinfo(
+                "Administrator required",
+                "Changing role assignments writes to a protected file in "
+                "%ProgramData%. Re-launch the GUI as a Windows Administrator "
+                "to make this change.")
+            return
         dlg = tb.Toplevel(self)
         dlg.title("Assign role")
         dlg.transient(self)
@@ -511,7 +522,11 @@ class App(tb.Window):
                 return
             picked = next(r for r in Role if r.label == role_var.get())
             self.roles.set(u, picked)
-            config_store.save_roles(self.roles.to_serializable())
+            try:
+                config_store.save_roles(self.roles.to_serializable())
+            except PermissionError as exc:
+                messagebox.showerror("Permission denied", str(exc))
+                return
             audit_event(str(config_store.audit_log_path()),
                         actor=self.current_user, role=self.current_role.value,
                         action="assign_role", target=f"user:{u}",
@@ -545,7 +560,11 @@ class App(tb.Window):
                 "the default role. Continue?"):
                 return
         self.roles.remove(user)
-        config_store.save_roles(self.roles.to_serializable())
+        try:
+            config_store.save_roles(self.roles.to_serializable())
+        except PermissionError as exc:
+            messagebox.showerror("Permission denied", str(exc))
+            return
         audit_event(str(config_store.audit_log_path()),
                     actor=self.current_user, role=self.current_role.value,
                     action="remove_role", target=f"user:{user}", success=True)
@@ -709,7 +728,7 @@ class App(tb.Window):
         dlg.title("New client secret — copy now")
         dlg.transient(parent)
         dlg.grab_set()
-        dlg.geometry("560x220")
+        dlg.geometry("580x260")
         tb.Label(dlg, bootstyle="warning",
                  text=("⚠  This is the only time you will see this value. "
                        "Copy it into the consuming system, then close.")
@@ -719,13 +738,48 @@ class App(tb.Window):
         txt.configure(state="disabled")
         txt.pack(fill=X, padx=14)
 
+        clip_state = {"countdown": 0, "job": None}
+        countdown_var = tk.StringVar(value="")
+
+        def clear_clipboard():
+            try:
+                if self.clipboard_get() == secret:
+                    self.clipboard_clear()
+            except tk.TclError:
+                pass
+            countdown_var.set("Clipboard cleared.")
+            clip_state["countdown"] = 0
+
+        def tick():
+            if clip_state["countdown"] <= 0:
+                clear_clipboard()
+                return
+            countdown_var.set(f"Clipboard auto-clears in {clip_state['countdown']}s")
+            clip_state["countdown"] -= 1
+            clip_state["job"] = self.after(1000, tick)
+
         def copy():
             self.clipboard_clear()
             self.clipboard_append(secret)
+            if clip_state["job"]:
+                self.after_cancel(clip_state["job"])
+            clip_state["countdown"] = 30
+            tick()
+
+        tb.Label(dlg, textvariable=countdown_var,
+                 bootstyle="secondary").pack(anchor="w", padx=14, pady=(8, 0))
+
+        def on_close():
+            if clip_state["job"]:
+                self.after_cancel(clip_state["job"])
+            clear_clipboard()
+            dlg.destroy()
+        dlg.protocol("WM_DELETE_WINDOW", on_close)
+
         bar = tb.Frame(dlg, padding=(14, 12, 14, 14))
         bar.pack(fill=X)
         tb.Button(bar, text="Close", bootstyle="secondary",
-                  command=dlg.destroy).pack(side=RIGHT)
+                  command=on_close).pack(side=RIGHT)
         tb.Button(bar, text="Copy to clipboard", bootstyle="primary",
                   command=copy).pack(side=RIGHT, padx=(0, 8))
 
