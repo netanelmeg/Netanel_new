@@ -28,6 +28,7 @@ Windows Server, from a clean machine through your first notification.
 16. [Troubleshooting](#16-troubleshooting)
 17. [Appendix: file locations and exit codes](#17-appendix-file-locations-and-exit-codes)
 18. [Security model & least-privilege checklist](#18-security-model--least-privilege-checklist)
+19. [Building EXE / MSI from source](#19-building-exe--msi-from-source)
 
 ---
 
@@ -83,7 +84,29 @@ Windows Server, from a clean machine through your first notification.
 
 ## 4. Get the code
 
-Either clone with git or download the ZIP:
+You have three options. Pick one.
+
+### A. Install the prebuilt MSI *(easiest, recommended for production)*
+
+Download `AzureSecretMonitor.msi` from the latest GitHub Release and
+double-click it. The installer:
+
+- Drops both EXEs in `C:\Program Files\AzureSecretMonitor\`.
+- Creates a Start Menu shortcut to "Azure Secret Monitor".
+- Runs `Initialize-Permissions.ps1` automatically (section 8a) so the
+  machine-wide role store has its least-privilege ACL from day one.
+- Registers itself in Add/Remove Programs for clean uninstall.
+
+If you go this path, skip sections 5 and 8a — they're already done.
+
+### B. Run the standalone EXE *(no installer, no Python required)*
+
+Download `AzureSecretMonitor.exe` from the same release and put it
+anywhere. Useful for one-off scans on a server you don't want to install
+software on. You'll need to run `Initialize-Permissions.ps1` manually
+(section 8a) if you want the role store and audit log.
+
+### C. Clone and run from source *(developers)*
 
 ```powershell
 cd C:\
@@ -91,7 +114,7 @@ git clone https://github.com/netanelmeg/Netanel_new.git AzureSecretMonitor
 cd C:\AzureSecretMonitor
 ```
 
-(Adjust the URL if you forked the repo internally.)
+Continue with sections 5 → 13.
 
 ---
 
@@ -574,3 +597,102 @@ registration) to revoke access.
 - The service principal credentials themselves are the ultimate authority.
   Treat the SP secret like a vault root key: rotate periodically and limit
   who can read `%APPDATA%\AzureSecretMonitor\secret.bin`.
+
+---
+
+## 19. Building EXE / MSI from source
+
+Two artifact types are supported, both produced from the same Python
+source:
+
+| Artifact | Purpose | Built by |
+|---|---|---|
+| `AzureSecretMonitor.exe` | Standalone windowed GUI; no Python required on target | PyInstaller |
+| `AzureSecretMonitorCli.exe` | Standalone console CLI used by the Scheduled Task | PyInstaller |
+| `AzureSecretMonitor.msi` | Per-machine installer with Start Menu shortcut and auto-`Initialize-Permissions.ps1` | WiX Toolset v3 |
+
+### Prerequisites on the build machine
+
+- Windows 10/11 or Windows Server (build must be on Windows — PyInstaller
+  produces native binaries for the host OS).
+- Python 3.11 or 3.12 with `tcl/tk and IDLE` ticked.
+- For MSI only: [WiX Toolset v3](https://wixtoolset.org/releases/)
+  installed and `candle.exe` / `light.exe` on `PATH`.
+
+### Build the EXEs
+
+```powershell
+cd C:\AzureSecretMonitor\windows
+powershell -ExecutionPolicy Bypass -File .\Build-Exe.ps1
+```
+
+Output: `dist\AzureSecretMonitor.exe` (≈ 50 MB, GUI) and
+`dist\AzureSecretMonitorCli.exe` (≈ 40 MB, console). First run extracts
+the bundled Python runtime to a temp dir; subsequent runs are cached and
+fast.
+
+The PyInstaller spec at `windows\AzureSecretMonitor.spec` includes the
+helper PowerShell scripts as data files, so the "Install Scheduled Task"
+button in the GUI keeps working from a frozen install.
+
+### Build the MSI
+
+```powershell
+cd C:\AzureSecretMonitor\windows
+powershell -ExecutionPolicy Bypass -File .\Build-Msi.ps1 -Version 1.0.0.0
+```
+
+Output: `dist\AzureSecretMonitor.msi`. The script:
+
+1. Calls `Build-Exe.ps1` first (use `-SkipExeBuild` to reuse existing
+   binaries).
+2. Runs `candle.exe` to compile `installer.wxs` against the version you
+   supplied.
+3. Runs `light.exe` to link the MSI with the WixUI minimal theme.
+
+Version bumping: pass `-Version 1.2.0.0` for every release. The
+`UpgradeCode` in `installer.wxs` is fixed, so MSIs with monotonically
+increasing `ProductVersion` upgrade cleanly on top of older installs.
+
+### Automated builds via GitHub Actions
+
+`.github/workflows/build-release.yml` runs on every tag push matching
+`v*` (and on-demand via the Actions tab). It:
+
+1. Sets up Python on `windows-latest`.
+2. Installs WiX via Chocolatey and adds it to `PATH`.
+3. Runs `Build-Exe.ps1` and `Build-Msi.ps1`.
+4. Uploads the three artifacts (`exe`, `cli`, `msi`) to the workflow run.
+5. If the trigger was a `v*` tag, attaches them to the matching GitHub
+   Release.
+
+To cut a release:
+
+```powershell
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+Within 5 minutes the release page has both `AzureSecretMonitor.exe` and
+`AzureSecretMonitor.msi` attached and ready to download.
+
+### Signing (optional)
+
+The build pipeline does **not** sign the binaries — your team is expected
+to wrap signing into your release process. If you have a code-signing
+certificate available, add a `signtool.exe sign` step to
+`Build-Exe.ps1` after PyInstaller and to `Build-Msi.ps1` after the MSI
+is linked. SmartScreen reputation will benefit.
+
+### Uninstalling the MSI
+
+```powershell
+# Add/Remove Programs OR:
+msiexec /x "C:\path\to\AzureSecretMonitor.msi" /quiet
+```
+
+The MSI removes the Program Files folder and the Start Menu shortcut.
+User config in `%APPDATA%` and machine-wide state in `%ProgramData%` are
+left intact deliberately so re-installs preserve role assignments and
+the audit log. Wipe them manually if you want a true clean slate
+(commands in section 17 → Uninstall).
