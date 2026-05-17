@@ -466,6 +466,74 @@ def audit_event(log_path: str, *, actor: str, role: str, action: str,
         LOG.error("Could not write audit log %s: %s", log_path, exc)
 
 
+# --- connection test --------------------------------------------------------
+
+@dataclass
+class ConnectionTestResult:
+    """Lightweight pre-flight check for the Azure tab."""
+    auth_ok: bool = False
+    auth_detail: str = ""
+    graph_ok: bool = False
+    graph_detail: str = ""
+    vault_results: dict = field(default_factory=dict)  # name -> (bool, str)
+
+    def all_ok(self) -> bool:
+        return (self.auth_ok and self.graph_ok
+                and all(ok for ok, _ in self.vault_results.values()))
+
+
+def test_connection(cfg: AppConfig) -> ConnectionTestResult:
+    """Try a token acquisition, one Graph call, and one list-call per vault.
+
+    Cheap (≤ 1 request per resource) but covers every common failure mode:
+    bad client secret, missing Graph consent, missing KV role assignment.
+    """
+    result = ConnectionTestResult(
+        vault_results={v: (False, "skipped") for v in cfg.key_vaults}
+    )
+    try:
+        cred = make_credential(cfg)
+        token = cred.get_token("https://graph.microsoft.com/.default")
+        result.auth_ok = True
+        mins = max(0, int((token.expires_on - datetime.now().timestamp()) / 60))
+        result.auth_detail = f"Token acquired (valid {mins} more min)."
+    except Exception as exc:
+        result.auth_detail = str(exc)[:300]
+        return result
+
+    if cfg.scan_app_registrations:
+        try:
+            client = GraphClient(credential=cred)
+            resp = client.get("https://graph.microsoft.com/v1.0/applications"
+                              "?$top=1&$select=appId")
+            if resp.status_code == 200:
+                result.graph_ok = True
+                count = len(resp.json().get("value", []))
+                result.graph_detail = (
+                    f"Listed {count} application(s) — Application.Read.All works."
+                    if count else "Listed 0 applications (no apps in tenant?).")
+            else:
+                result.graph_detail = f"HTTP {resp.status_code}: {resp.text[:200]}"
+        except Exception as exc:
+            result.graph_detail = str(exc)[:300]
+    else:
+        result.graph_ok = True
+        result.graph_detail = "App-registration scan disabled — skipped."
+
+    for vault in cfg.key_vaults:
+        try:
+            url = f"https://{vault}.vault.azure.net"
+            sc = SecretClient(vault_url=url, credential=cred)
+            sample = next(iter(sc.list_properties_of_secrets()), None)
+            detail = ("List secrets OK." if sample is None
+                      else "List secrets OK (≥1 found).")
+            result.vault_results[vault] = (True, detail)
+        except Exception as exc:
+            result.vault_results[vault] = (False, str(exc)[:300])
+
+    return result
+
+
 def severity_rank(status: str) -> int:
     return {"OK": 0, "WARNING": 1, "CRITICAL": 2, "EXPIRED": 3}.get(status, -1)
 
