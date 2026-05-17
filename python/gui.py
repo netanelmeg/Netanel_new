@@ -26,11 +26,12 @@ from ttkbootstrap.constants import (
 import config_store
 import permissions as perms
 from core import (
-    AppConfig, ExpiringItem, add_app_password, audit_event,
+    AppConfig, ConnectionTestResult, ExpiringItem,
+    add_app_password, audit_event,
     filter_items, find_app_object_id, items_needing_alert,
     make_credential, notify_email, notify_teams,
     renew_keyvault_certificate_expiry, renew_keyvault_key_expiry,
-    renew_keyvault_secret_expiry, scan_all,
+    renew_keyvault_secret_expiry, scan_all, test_connection,
 )
 from permissions import Permission, Role, RoleAssignments
 
@@ -242,10 +243,12 @@ class App(tb.Window):
         bar.pack(fill=X, pady=(0, 8))
         tb.Button(bar, text="🔄  Rescan", bootstyle="primary-outline",
                   command=self.scan_now).pack(side=LEFT)
+        tb.Button(bar, text="⬇  Export…", bootstyle="secondary-outline",
+                  command=self.export_results).pack(side=LEFT, padx=8)
         tb.Button(bar, text="✉  Test email", bootstyle="secondary-outline",
-                  command=self.test_email).pack(side=LEFT, padx=8)
+                  command=self.test_email).pack(side=LEFT)
         tb.Button(bar, text="💬  Test Teams", bootstyle="secondary-outline",
-                  command=self.test_teams).pack(side=LEFT)
+                  command=self.test_teams).pack(side=LEFT, padx=8)
 
         tb.Label(bar, text="Filter:", bootstyle="secondary").pack(side=LEFT, padx=(24, 6))
         self.filter_var = tk.StringVar()
@@ -333,8 +336,12 @@ class App(tb.Window):
         self.vaults_text.insert("1.0", "\n".join(self.cfg.key_vaults))
         scope.columnconfigure(1, weight=1)
 
-        tb.Button(f, text="💾  Save settings", bootstyle=SUCCESS,
-                  command=self.save_settings).pack(anchor="e", pady=(16, 0))
+        bar = tb.Frame(f)
+        bar.pack(fill=X, pady=(16, 0))
+        tb.Button(bar, text="🔌  Test connection", bootstyle="info-outline",
+                  command=self.test_connection).pack(side=LEFT)
+        tb.Button(bar, text="💾  Save settings", bootstyle=SUCCESS,
+                  command=self.save_settings).pack(side=RIGHT)
         return f
 
     # ---------- Notifications -------------------------------------------
@@ -915,6 +922,132 @@ class App(tb.Window):
             LOG.exception("Scan failed")
             self.event_queue.put(("status", f"● Scan failed: {exc}"))
 
+    def test_connection(self) -> None:
+        cfg = self._gather_settings()
+        errors = cfg.validate_for_scan()
+        if errors:
+            messagebox.showerror("Configuration incomplete", "\n".join(errors))
+            return
+        self.status_var.set("● Testing connection...")
+        t = threading.Thread(target=self._do_test_connection,
+                             args=(cfg,), daemon=True)
+        t.start()
+
+    def _do_test_connection(self, cfg: AppConfig) -> None:
+        try:
+            result = test_connection(cfg)
+            self.event_queue.put(("conn_test", result))
+            self.event_queue.put(("status",
+                "● Connection test complete." if result.all_ok()
+                else "● Connection test found issues."))
+        except Exception as exc:
+            LOG.exception("Test connection crashed")
+            self.event_queue.put(("status", f"● Test failed: {exc}"))
+
+    def _show_conn_test_result(self, result: ConnectionTestResult) -> None:
+        dlg = tb.Toplevel(self)
+        dlg.title("Connection test")
+        dlg.transient(self)
+        dlg.grab_set()
+        dlg.geometry("640x460")
+
+        tb.Label(dlg, text="Connection test results",
+                 font=("Segoe UI Semibold", 14),
+                 padding=(16, 14, 16, 0)).pack(anchor="w")
+
+        body = tb.Frame(dlg, padding=16)
+        body.pack(fill=BOTH, expand=True)
+
+        def row(parent, label: str, ok: bool, detail: str, r: int):
+            badge_style = "inverse-success" if ok else "inverse-danger"
+            badge_text = "  PASS  " if ok else "  FAIL  "
+            tb.Label(parent, text=label,
+                     font=("Segoe UI Semibold", 10)).grid(
+                         row=r, column=0, sticky="nw", padx=(0, 12), pady=4)
+            tb.Label(parent, text=badge_text,
+                     bootstyle=badge_style,
+                     font=("Segoe UI Semibold", 9)).grid(
+                         row=r, column=1, sticky="nw", pady=4)
+            tb.Label(parent, text=detail, bootstyle="secondary",
+                     wraplength=420, justify="left").grid(
+                         row=r, column=2, sticky="w", padx=(12, 0), pady=4)
+
+        row(body, "Token acquisition", result.auth_ok, result.auth_detail, 0)
+        row(body, "Microsoft Graph",   result.graph_ok, result.graph_detail, 1)
+
+        for idx, (vault, (ok, detail)) in enumerate(result.vault_results.items(), start=2):
+            row(body, f"Key Vault: {vault}", ok, detail, idx)
+
+        body.columnconfigure(2, weight=1)
+
+        bar = tb.Frame(dlg, padding=(16, 0, 16, 16))
+        bar.pack(fill=X)
+        tb.Button(bar, text="Close", bootstyle="secondary",
+                  command=dlg.destroy).pack(side=RIGHT)
+
+    def export_results(self) -> None:
+        from tkinter import filedialog
+        import csv as csvmod
+        import json as jsonmod
+
+        if not self.items:
+            messagebox.showinfo("Nothing to export",
+                                "Run a scan first — the dashboard is empty.")
+            return
+
+        items = self._currently_visible_items()
+        ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+        fname = filedialog.asksaveasfilename(
+            parent=self,
+            title="Export scan results",
+            defaultextension=".csv",
+            initialfile=f"azure-secrets-{ts}.csv",
+            filetypes=[("CSV (Excel-friendly)", "*.csv"),
+                       ("JSON (machine-readable)", "*.json")],
+        )
+        if not fname:
+            return
+
+        try:
+            if fname.lower().endswith(".json"):
+                data = [{
+                    "source": i.source, "kind": i.kind, "name": i.name,
+                    "container": i.container,
+                    "expires_on": i.expires_on.isoformat(),
+                    "days_remaining": i.days_remaining,
+                    "status": i.status, "identifier": i.identifier,
+                } for i in items]
+                with open(fname, "w", encoding="utf-8") as f:
+                    jsonmod.dump(data, f, indent=2)
+            else:
+                with open(fname, "w", encoding="utf-8", newline="") as f:
+                    w = csvmod.writer(f)
+                    w.writerow(["status", "days_remaining", "source", "kind",
+                                "container", "name", "expires_on_utc",
+                                "identifier"])
+                    for i in items:
+                        w.writerow([i.status, i.days_remaining, i.source, i.kind,
+                                    i.container, i.name,
+                                    i.expires_on.strftime("%Y-%m-%d %H:%M:%S"),
+                                    i.identifier])
+            messagebox.showinfo("Exported",
+                f"Wrote {len(items)} row(s) to:\n{fname}")
+            audit_event(str(config_store.audit_log_path()),
+                        actor=self.current_user, role=self.current_role.value,
+                        action="export", target=os.path.basename(fname),
+                        success=True, detail=f"rows={len(items)}")
+        except OSError as exc:
+            messagebox.showerror("Export failed", str(exc))
+
+    def _currently_visible_items(self) -> list[ExpiringItem]:
+        """Respect the dashboard filter so 'Export' only writes what you see."""
+        needle = (self.filter_var.get() if hasattr(self, "filter_var") else "").lower().strip()
+        if not needle:
+            return list(self.items)
+        return [i for i in self.items
+                if needle in " ".join([i.source, i.kind, i.container,
+                                       i.name, i.status]).lower()]
+
     def test_teams(self) -> None:
         cfg = self._gather_settings()
         if not cfg.teams_webhook:
@@ -1001,6 +1134,8 @@ class App(tb.Window):
                     self.status_var.set("● " + payload if not payload.startswith("●") else payload)
                 elif kind == "items":
                     self._render_items(payload)
+                elif kind == "conn_test":
+                    self._show_conn_test_result(payload)
         except queue.Empty:
             pass
         self.after(150, self._poll_events)

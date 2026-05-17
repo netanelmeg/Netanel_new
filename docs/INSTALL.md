@@ -257,6 +257,19 @@ Windows DPAPI under your current user and written to
 `%APPDATA%\AzureSecretMonitor\secret.bin`. Nothing sensitive is stored in
 plaintext on disk.
 
+### Verify with "Test connection"
+
+Click **🔌 Test connection** to run a quick pre-flight: it acquires a
+token, makes one Graph call, and lists one secret from each configured
+vault. The result modal shows a PASS/FAIL badge per check so you can
+diagnose permission gaps before running a real scan. Common failures:
+
+| Failure | Likely cause |
+|---|---|
+| Token acquisition fails | Wrong tenant/client ID, or the client secret expired or was mistyped. |
+| Graph call fails (403) | `Application.Read.All` not granted, or admin consent missing. |
+| A specific Key Vault fails (403) | The SP doesn't have `Key Vault Secrets User` on that vault. |
+
 ---
 
 ## 10. Configure notifications
@@ -304,6 +317,10 @@ status counters update:
 - Each row's left column is its severity (`EXPIRED`, `CRITICAL`, `WARNING`,
   or `OK`).
 - Use the **Filter** box to narrow down by name / vault / kind.
+- **⬇ Export…** writes the currently-visible rows (post-filter) to either
+  CSV (Excel-friendly) or JSON (machine-readable), useful for opening
+  tickets or feeding the report into spreadsheets. Exports are recorded
+  in `audit.log`.
 
 If the configured notification channels are set up, **rising-severity items
 are sent automatically** during this same scan — but only items whose
