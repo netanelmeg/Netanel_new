@@ -1,0 +1,80 @@
+name: Build EXE and MSI
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Four-part version, e.g. 1.0.0.0'
+        required: false
+        default: '1.0.0.0'
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Python build dependencies
+        run: |
+          python -m pip install --upgrade pip pyinstaller
+          python -m pip install -r python/requirements.txt
+
+      - name: Install WiX Toolset
+        run: |
+          choco install wixtoolset --version 3.14.1 -y --no-progress
+          $wixBin = (Get-ChildItem "C:\Program Files (x86)\WiX Toolset*\bin" |
+                     Select-Object -First 1).FullName
+          if (-not $wixBin) { throw 'WiX bin folder not found.' }
+          echo $wixBin >> $env:GITHUB_PATH
+
+      - name: Resolve build version
+        id: ver
+        shell: pwsh
+        run: |
+          $ref = "${{ github.ref }}"
+          if ($ref.StartsWith('refs/tags/v')) {
+            $v = $ref.Substring('refs/tags/v'.Length)
+            if ($v -notmatch '^\d+\.\d+\.\d+\.\d+$') { $v = "$v.0" }
+          } elseif ("${{ github.event.inputs.version }}") {
+            $v = "${{ github.event.inputs.version }}"
+          } else {
+            $v = '1.0.0.0'
+          }
+          Write-Host "Building version $v"
+          "version=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Build executables
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File windows\Build-Exe.ps1
+
+      - name: Build MSI
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File windows\Build-Msi.ps1 -SkipExeBuild -Version ${{ steps.ver.outputs.version }}
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: AzureSecretMonitor-${{ steps.ver.outputs.version }}
+          path: |
+            dist/AzureSecretMonitor.exe
+            dist/AzureSecretMonitorCli.exe
+            dist/AzureSecretMonitor.msi
+
+      - name: Attach to GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/AzureSecretMonitor.exe
+            dist/AzureSecretMonitorCli.exe
+            dist/AzureSecretMonitor.msi

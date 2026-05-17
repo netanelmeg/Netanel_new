@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  WiX manifest for the Azure Secret Monitor MSI.
+
+  Installs to %ProgramFiles%\AzureSecretMonitor, drops a Start-Menu
+  shortcut, and runs Initialize-Permissions.ps1 once at install time so
+  the machine-wide role store has a least-privilege ACL from day one.
+
+  The UpgradeCode is stable across versions — never change it. Each
+  release bumps Product/@Version (driven by the build script).
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*"
+           Name="Azure Secret Monitor"
+           Language="1033"
+           Version="$(var.ProductVersion)"
+           Manufacturer="Netanel"
+           UpgradeCode="64BC5C3B-F274-40ED-9850-3EF81E5DBCC1">
+
+    <Package InstallerVersion="500"
+             Compressed="yes"
+             InstallScope="perMachine"
+             Description="On-prem monitor for Azure secret expirations" />
+
+    <MediaTemplate EmbedCab="yes" />
+
+    <MajorUpgrade
+        DowngradeErrorMessage="A newer version of Azure Secret Monitor is already installed." />
+
+    <Feature Id="MainFeature" Title="Azure Secret Monitor" Level="1">
+      <ComponentGroupRef Id="ProductComponents" />
+      <ComponentRef Id="StartMenuShortcut" />
+    </Feature>
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLFOLDER" Name="AzureSecretMonitor" />
+      </Directory>
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="ApplicationProgramsFolder" Name="Azure Secret Monitor" />
+      </Directory>
+    </Directory>
+
+    <ComponentGroup Id="ProductComponents" Directory="INSTALLFOLDER">
+      <Component Id="GuiExe" Guid="A8B0C1D2-E3F4-4506-9788-AABBCCDDEE01">
+        <File Id="GuiExeFile"
+              Source="$(var.DistDir)\AzureSecretMonitor.exe"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="CliExe" Guid="A8B0C1D2-E3F4-4506-9788-AABBCCDDEE02">
+        <File Id="CliExeFile"
+              Source="$(var.DistDir)\AzureSecretMonitorCli.exe"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="InitPermsPs1" Guid="A8B0C1D2-E3F4-4506-9788-AABBCCDDEE03">
+        <File Id="InitPermsPs1File"
+              Source="Initialize-Permissions.ps1"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="InstallTaskPs1" Guid="A8B0C1D2-E3F4-4506-9788-AABBCCDDEE04">
+        <File Id="InstallTaskPs1File"
+              Source="Install-ScheduledTask.ps1"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="ReadmeTxt" Guid="A8B0C1D2-E3F4-4506-9788-AABBCCDDEE05">
+        <File Id="ReadmeTxtFile"
+              Source="..\README.md"
+              KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <DirectoryRef Id="ApplicationProgramsFolder">
+      <Component Id="StartMenuShortcut" Guid="A8B0C1D2-E3F4-4506-9788-AABBCCDDEE06">
+        <Shortcut Id="ApplicationStartMenuShortcut"
+                  Name="Azure Secret Monitor"
+                  Description="Monitor Azure secret expirations"
+                  Target="[INSTALLFOLDER]AzureSecretMonitor.exe"
+                  WorkingDirectory="INSTALLFOLDER" />
+        <RemoveFolder Id="RemoveProgramsFolder"
+                      Directory="ApplicationProgramsFolder"
+                      On="uninstall" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\Netanel\AzureSecretMonitor"
+                       Name="installed"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <!-- Initialize-Permissions.ps1 runs once at install time so the machine-
+         wide role store has its restrictive ACL before the GUI is first
+         launched. Deferred + impersonate=no = runs as SYSTEM. -->
+    <CustomAction Id="RunInitPerms"
+                  Directory="INSTALLFOLDER"
+                  ExeCommand='powershell.exe -NoProfile -ExecutionPolicy Bypass -File "[INSTALLFOLDER]Initialize-Permissions.ps1"'
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="ignore" />
+
+    <InstallExecuteSequence>
+      <Custom Action="RunInitPerms" After="InstallFiles">NOT Installed</Custom>
+    </InstallExecuteSequence>
+
+    <UIRef Id="WixUI_Minimal" />
+  </Product>
+</Wix>

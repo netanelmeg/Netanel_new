@@ -29,25 +29,35 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-if (-not $PythonPath) {
-    $cmd = Get-Command python.exe -ErrorAction SilentlyContinue
-    if (-not $cmd) { throw 'python.exe not found on PATH. Pass -PythonPath explicitly.' }
-    $PythonPath = $cmd.Source
+# Pick CLI runner: prefer the bundled EXE (MSI install), fall back to
+# python.exe + cli.py (source layout).
+$cliExe = Join-Path $PSScriptRoot 'AzureSecretMonitorCli.exe'
+if (Test-Path $cliExe) {
+    $execute = $cliExe
+    $arguments = $null
+    $workDir = Split-Path -Parent $cliExe
+} else {
+    if (-not $PythonPath) {
+        $cmd = Get-Command python.exe -ErrorAction SilentlyContinue
+        if (-not $cmd) { throw 'python.exe not found on PATH. Pass -PythonPath explicitly.' }
+        $PythonPath = $cmd.Source
+    }
+    $repoRoot = Split-Path -Parent $PSScriptRoot
+    $cliScript = Join-Path $repoRoot 'python\cli.py'
+    if (-not (Test-Path $cliScript)) { throw "cli.py not found at $cliScript" }
+    $execute = $PythonPath
+    $arguments = "`"$cliScript`""
+    $workDir = Split-Path -Parent $cliScript
 }
 
-$repoRoot = Split-Path -Parent $PSScriptRoot
-$cliPath  = Join-Path $repoRoot 'python\cli.py'
-if (-not (Test-Path $cliPath)) { throw "cli.py not found at $cliPath" }
-
-$workDir = Split-Path -Parent $cliPath
 $logDir  = Join-Path $env:ProgramData 'AzureSecretMonitor\logs'
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null
-$logFile = Join-Path $logDir 'cli.log'
 
-$action = New-ScheduledTaskAction `
-    -Execute $PythonPath `
-    -Argument "`"$cliPath`" >> `"$logFile`" 2>&1" `
-    -WorkingDirectory $workDir
+if ($arguments) {
+    $action = New-ScheduledTaskAction -Execute $execute -Argument $arguments -WorkingDirectory $workDir
+} else {
+    $action = New-ScheduledTaskAction -Execute $execute -WorkingDirectory $workDir
+}
 
 $trigger = New-ScheduledTaskTrigger -Daily -At $Time
 $settings = New-ScheduledTaskSettingsSet `

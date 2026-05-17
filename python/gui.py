@@ -8,11 +8,14 @@ and layout are new.
 from __future__ import annotations
 
 import logging
+import os
 import queue
+import sys
 import threading
 import time
 import tkinter as tk
 from datetime import datetime
+from pathlib import Path
 from tkinter import messagebox
 
 import ttkbootstrap as tb
@@ -48,6 +51,30 @@ STATUS_STYLES = {
 }
 LIGHT_THEME = "cosmo"
 DARK_THEME = "darkly"
+
+
+def _resource_path(rel_path: str) -> Path | None:
+    """Locate a bundled resource, accounting for PyInstaller / MSI / dev runs.
+
+    Search order:
+      1. PyInstaller one-file extraction dir (`sys._MEIPASS`).
+      2. Directory next to the running executable (one-dir build / MSI install).
+      3. Repo layout when running from source: `<repo>/<rel_path>`.
+    """
+    candidates: list[Path] = []
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidates.append(Path(meipass) / rel_path)
+    if getattr(sys, "frozen", False):
+        candidates.append(Path(sys.executable).parent / rel_path)
+        # MSI layout: scripts live next to the EXE without the "windows/" prefix.
+        candidates.append(Path(sys.executable).parent / os.path.basename(rel_path))
+    else:
+        candidates.append(Path(__file__).resolve().parent.parent / rel_path)
+    for c in candidates:
+        if c.exists():
+            return c
+    return None
 
 
 class App(tb.Window):
@@ -917,11 +944,14 @@ class App(tb.Window):
                 "Permission required",
                 "Only Admins can install the Scheduled Task.")
             return
-        from pathlib import Path
         import subprocess
-        script = Path(__file__).parent.parent / "windows" / "Install-ScheduledTask.ps1"
-        if not script.exists():
-            messagebox.showerror("Missing", f"Could not find {script}")
+        script = _resource_path("windows/Install-ScheduledTask.ps1")
+        if not script or not script.exists():
+            messagebox.showerror(
+                "Missing",
+                "Could not locate Install-ScheduledTask.ps1 near the running "
+                "executable. If you built a custom package, ensure the script "
+                "ships alongside the EXE.")
             return
         try:
             subprocess.Popen([
