@@ -21,10 +21,15 @@ from ttkbootstrap.constants import (
 )
 
 import config_store
+import permissions as perms
 from core import (
-    AppConfig, ExpiringItem, filter_items, items_needing_alert,
-    notify_email, notify_teams, scan_all,
+    AppConfig, ExpiringItem, add_app_password, audit_event,
+    filter_items, find_app_object_id, items_needing_alert,
+    make_credential, notify_email, notify_teams,
+    renew_keyvault_certificate_expiry, renew_keyvault_key_expiry,
+    renew_keyvault_secret_expiry, scan_all,
 )
+from permissions import Permission, Role, RoleAssignments
 
 LOG = logging.getLogger("azure-secret-monitor.gui")
 
@@ -48,11 +53,17 @@ DARK_THEME = "darkly"
 class App(tb.Window):
     def __init__(self) -> None:
         super().__init__(themename=LIGHT_THEME, title="Azure Secret Monitor",
-                         size=(1180, 740), minsize=(1000, 620))
+                         size=(1200, 820), minsize=(1000, 700))
 
         self.cfg = config_store.load_config()
         if not self.cfg.smtp_password:
             self.cfg.smtp_password = config_store.load_smtp_password()
+
+        self.roles = RoleAssignments.from_serializable(config_store.load_roles())
+        if perms.bootstrap_if_empty(self.roles):
+            config_store.save_roles(self.roles.to_serializable())
+        self.current_user = perms.current_username()
+        self.current_role: Role = self.roles.role_for(self.current_user)
 
         self.items: list[ExpiringItem] = []
         self.event_queue: queue.Queue = queue.Queue()
@@ -86,6 +97,16 @@ class App(tb.Window):
         tb.Label(title_box, text="On-prem expiration tracking for Entra ID and Key Vault",
                  font=("Segoe UI", 10), bootstyle="secondary").pack(anchor="w")
 
+        role_box = tb.Frame(header)
+        role_box.pack(side=LEFT, padx=(28, 0))
+        role_style = {"admin": "danger", "contributor": "warning",
+                      "reader": "secondary"}[self.current_role.value]
+        tb.Label(role_box, text=f"👤 {self.current_user}",
+                 bootstyle="secondary").pack(anchor="w")
+        tb.Label(role_box, text=f"  {self.current_role.label}  ",
+                 bootstyle=f"inverse-{role_style}",
+                 font=("Segoe UI Semibold", 9)).pack(anchor="w", pady=(2, 0))
+
         actions = tb.Frame(header)
         actions.pack(side=RIGHT)
         self.theme_btn = tb.Button(actions, text="🌙 Dark", width=10,
@@ -110,6 +131,7 @@ class App(tb.Window):
             ("azure",         "Azure",         "☁"),
             ("notifications", "Notifications", "🔔"),
             ("scheduler",     "Scheduler",     "⏱"),
+            ("permissions",   "Permissions",   "🛡"),
         ]:
             btn = tb.Button(self.sidebar, text=f"  {icon}   {label}",
                             bootstyle="secondary-link", width=20,
@@ -155,6 +177,7 @@ class App(tb.Window):
         self._page_frames["azure"]         = self._build_azure_page()
         self._page_frames["notifications"] = self._build_notifications_page()
         self._page_frames["scheduler"]     = self._build_scheduler_page()
+        self._page_frames["permissions"]   = self._build_permissions_page()
 
     # ---------- Dashboard ------------------------------------------------
 
@@ -223,6 +246,11 @@ class App(tb.Window):
         self.tree.configure(yscrollcommand=vsb.set)
         self.tree.pack(side=LEFT, fill=BOTH, expand=True)
         vsb.pack(side=RIGHT, fill=Y)
+
+        self.row_menu = tk.Menu(self.tree, tearoff=0)
+        self.row_menu.add_command(label="Renew / extend…", command=self._renew_selected)
+        self.tree.bind("<Button-3>", self._on_tree_right_click)
+        self.tree.bind("<Double-1>", lambda e: self._renew_selected())
 
         return f
 
@@ -358,6 +386,349 @@ class App(tb.Window):
                   command=self.save_settings).pack(anchor="e", pady=(16, 0))
         return f
 
+    # ---------- Permissions ---------------------------------------------
+
+    def _build_permissions_page(self) -> tb.Frame:
+        f = tb.Frame(self.content)
+        tb.Label(f, text="Permissions",
+                 font=("Segoe UI Semibold", 14)).pack(anchor="w")
+        tb.Label(f, text=("Three-tier role model. Reader → Contributor → Admin. "
+                          "Roles are enforced in the UI; Azure-side limits come "
+                          "from the service principal's API permissions."),
+                 bootstyle="secondary", wraplength=860,
+                 justify="left").pack(anchor="w", pady=(0, 14))
+
+        top = tb.Frame(f)
+        top.pack(fill=BOTH, expand=True)
+
+        # Left: role tree (roles → granted capabilities)
+        left = tb.Labelframe(top, text="  Role tree  ",
+                             bootstyle="primary", padding=12)
+        left.pack(side=LEFT, fill=BOTH, expand=True, padx=(0, 8))
+
+        self.role_tree = tb.Treeview(left, show="tree", bootstyle=INFO,
+                                     height=14)
+        self.role_tree.pack(fill=BOTH, expand=True)
+        for role in Role:
+            node = self.role_tree.insert(
+                "", END, text=f"  {role.label}", open=True,
+                values=(role.value,))
+            for p in sorted(perms.effective_permissions(role), key=lambda x: x.label):
+                # mark inherited permissions with ↳
+                inherited = p not in perms.ROLE_PERMISSIONS[role]
+                prefix = "    ↳ " if inherited else "    ✓ "
+                self.role_tree.insert(node, END, text=prefix + p.label)
+
+        # Right: user assignments
+        right = tb.Labelframe(top, text="  User assignments  ",
+                              bootstyle="info", padding=12)
+        right.pack(side=LEFT, fill=BOTH, expand=True, padx=(8, 0))
+
+        cols = ("user", "role")
+        self.user_tree = tb.Treeview(right, columns=cols, show="headings",
+                                     bootstyle=INFO, height=11)
+        self.user_tree.heading("user", text="Windows user")
+        self.user_tree.heading("role", text="Role")
+        self.user_tree.column("user", width=200)
+        self.user_tree.column("role", width=120)
+        self.user_tree.pack(fill=BOTH, expand=True)
+
+        btn_bar = tb.Frame(right)
+        btn_bar.pack(fill=X, pady=(8, 0))
+        self.add_user_btn = tb.Button(btn_bar, text="+ Assign user…",
+                                      bootstyle="primary",
+                                      command=self._dlg_assign_user)
+        self.add_user_btn.pack(side=LEFT)
+        self.remove_user_btn = tb.Button(btn_bar, text="Remove",
+                                         bootstyle="danger-outline",
+                                         command=self._remove_selected_user)
+        self.remove_user_btn.pack(side=LEFT, padx=8)
+
+        self._refresh_user_tree()
+
+        # Bottom: capability matrix
+        matrix = tb.Labelframe(f, text="  Capability matrix  ",
+                               bootstyle="secondary", padding=12)
+        matrix.pack(fill=X, pady=(12, 0))
+
+        cols = ("cap", "reader", "contributor", "admin")
+        m = tb.Treeview(matrix, columns=cols, show="headings", height=9,
+                        bootstyle="secondary")
+        m.heading("cap", text="Capability")
+        m.heading("reader", text="Reader")
+        m.heading("contributor", text="Contributor")
+        m.heading("admin", text="Admin")
+        m.column("cap", width=320, anchor="w")
+        for c in ("reader", "contributor", "admin"):
+            m.column(c, width=110, anchor="center")
+        for perm, granted in perms.capability_matrix():
+            row = (perm.label,
+                   "✓" if granted[Role.READER] else "",
+                   "✓" if granted[Role.CONTRIBUTOR] else "",
+                   "✓" if granted[Role.ADMIN] else "")
+            m.insert("", END, values=row)
+        m.pack(fill=X)
+
+        # Hide management buttons if non-admin
+        if not perms.can(self.current_role, Permission.MANAGE_ROLES):
+            self.add_user_btn.configure(state="disabled")
+            self.remove_user_btn.configure(state="disabled")
+
+        return f
+
+    def _refresh_user_tree(self) -> None:
+        self.user_tree.delete(*self.user_tree.get_children())
+        items = sorted(self.roles.mapping.items(),
+                       key=lambda kv: (kv[1].rank, kv[0]))
+        for user, role in items:
+            self.user_tree.insert("", END, values=(
+                user if user != "*" else "<default>", role.label))
+
+    def _dlg_assign_user(self) -> None:
+        if not perms.can(self.current_role, Permission.MANAGE_ROLES):
+            return
+        dlg = tb.Toplevel(self)
+        dlg.title("Assign role")
+        dlg.transient(self)
+        dlg.grab_set()
+        dlg.geometry("400x220")
+
+        tb.Label(dlg, text="Windows username (or '*' for default):",
+                 padding=(12, 10, 12, 0)).pack(anchor="w")
+        user_var = tk.StringVar()
+        tb.Entry(dlg, textvariable=user_var, width=40).pack(
+            padx=12, pady=(0, 10), fill=X)
+
+        tb.Label(dlg, text="Role:", padding=(12, 0)).pack(anchor="w")
+        role_var = tk.StringVar(value=Role.READER.label)
+        tb.Combobox(dlg, textvariable=role_var, state="readonly",
+                    values=[r.label for r in Role]).pack(
+                        padx=12, pady=(0, 14), fill=X)
+
+        def commit():
+            u = user_var.get().strip()
+            if not u:
+                return
+            picked = next(r for r in Role if r.label == role_var.get())
+            self.roles.set(u, picked)
+            config_store.save_roles(self.roles.to_serializable())
+            audit_event(str(config_store.audit_log_path()),
+                        actor=self.current_user, role=self.current_role.value,
+                        action="assign_role", target=f"user:{u}",
+                        success=True, detail=f"role={picked.value}")
+            self._refresh_user_tree()
+            dlg.destroy()
+            # Refresh own role if we changed our own assignment.
+            self.current_role = self.roles.role_for(self.current_user)
+
+        bar = tb.Frame(dlg)
+        bar.pack(fill=X, padx=12, pady=(0, 12))
+        tb.Button(bar, text="Cancel", bootstyle="secondary-outline",
+                  command=dlg.destroy).pack(side=RIGHT)
+        tb.Button(bar, text="Assign", bootstyle="primary",
+                  command=commit).pack(side=RIGHT, padx=(0, 8))
+
+    def _remove_selected_user(self) -> None:
+        if not perms.can(self.current_role, Permission.MANAGE_ROLES):
+            return
+        sel = self.user_tree.selection()
+        if not sel:
+            return
+        user = self.user_tree.item(sel[0], "values")[0]
+        if user == "<default>":
+            messagebox.showinfo("Default", "The default (*) row cannot be removed.")
+            return
+        if user.lower() == self.current_user.lower():
+            if not messagebox.askyesno(
+                "Remove yourself?",
+                "You are removing your own assignment. You'll fall back to "
+                "the default role. Continue?"):
+                return
+        self.roles.remove(user)
+        config_store.save_roles(self.roles.to_serializable())
+        audit_event(str(config_store.audit_log_path()),
+                    actor=self.current_user, role=self.current_role.value,
+                    action="remove_role", target=f"user:{user}", success=True)
+        self._refresh_user_tree()
+        self.current_role = self.roles.role_for(self.current_user)
+
+    # ---------- Renew / extend dialog -----------------------------------
+
+    def _on_tree_right_click(self, event) -> None:
+        row = self.tree.identify_row(event.y)
+        if not row:
+            return
+        self.tree.selection_set(row)
+        if perms.can(self.current_role, Permission.RENEW_CREDENTIAL):
+            self.row_menu.tk_popup(event.x_root, event.y_root)
+
+    def _selected_item(self) -> ExpiringItem | None:
+        sel = self.tree.selection()
+        if not sel:
+            return None
+        idx = self.tree.index(sel[0])
+        if idx >= len(self.items):
+            return None
+        # The tree may be filtered; find item by displayed values instead.
+        values = self.tree.item(sel[0], "values")
+        target_name = values[5]
+        target_container = values[4]
+        for it in self.items:
+            if it.name == target_name and it.container == target_container:
+                return it
+        return None
+
+    def _renew_selected(self) -> None:
+        if not perms.can(self.current_role, Permission.RENEW_CREDENTIAL):
+            messagebox.showinfo(
+                "Permission required",
+                "Your role does not allow renewing credentials. "
+                "Ask an Admin to promote you to Contributor or higher.")
+            return
+        item = self._selected_item()
+        if not item:
+            return
+        self._open_renew_dialog(item)
+
+    def _open_renew_dialog(self, item: ExpiringItem) -> None:
+        dlg = tb.Toplevel(self)
+        dlg.title("Renew / extend credential")
+        dlg.transient(self)
+        dlg.grab_set()
+        dlg.geometry("520x360")
+
+        tb.Label(dlg, text=f"{item.source}  /  {item.kind}",
+                 bootstyle="secondary").pack(anchor="w", padx=14, pady=(14, 0))
+        tb.Label(dlg, text=item.name,
+                 font=("Segoe UI Semibold", 13)).pack(anchor="w", padx=14)
+        tb.Label(dlg, text=f"In: {item.container}",
+                 bootstyle="secondary").pack(anchor="w", padx=14, pady=(0, 12))
+
+        # Body varies slightly by source
+        body = tb.Frame(dlg, padding=14)
+        body.pack(fill=BOTH, expand=True)
+
+        from datetime import timedelta
+        default_days = 365
+        default_expiry = item.expires_on.replace(tzinfo=None) + timedelta(days=default_days)
+        new_date_var = tk.StringVar(value=default_expiry.strftime("%Y-%m-%d"))
+        tb.Label(body, text="New expiry date (YYYY-MM-DD):").grid(
+            row=0, column=0, sticky="w", pady=4)
+        tb.Entry(body, textvariable=new_date_var, width=22).grid(
+            row=0, column=1, sticky="w", pady=4)
+
+        display_name_var = tk.StringVar(
+            value=f"renewed-{datetime.utcnow().strftime('%Y%m%d')}")
+        if item.source == "AppRegistration" and item.kind == "ClientSecret":
+            tb.Label(body, text="New secret display name:").grid(
+                row=1, column=0, sticky="w", pady=4)
+            tb.Entry(body, textvariable=display_name_var, width=30).grid(
+                row=1, column=1, sticky="w", pady=4)
+            tb.Label(body, wraplength=460, justify="left", bootstyle="warning",
+                     text=("This will create a *new* client secret on the app "
+                           "registration. The old secret is NOT removed — "
+                           "rotate the consumer first, then delete the old "
+                           "secret manually in the portal.")).grid(
+                               row=2, column=0, columnspan=2, sticky="we", pady=(10, 0))
+        else:
+            tb.Label(body, wraplength=460, justify="left", bootstyle="info",
+                     text=("This updates the `expires_on` metadata only. The "
+                           "underlying secret material is unchanged. If the "
+                           "value itself is compromised, also rotate it.")).grid(
+                               row=2, column=0, columnspan=2, sticky="we", pady=(10, 0))
+
+        result_box = tb.Frame(dlg)
+        result_box.pack(fill=X, padx=14)
+
+        bar = tb.Frame(dlg, padding=(14, 0, 14, 14))
+        bar.pack(fill=X)
+
+        def commit():
+            from datetime import datetime as _dt, timezone as _tz
+            try:
+                new_dt = _dt.strptime(new_date_var.get().strip(), "%Y-%m-%d")
+                new_dt = new_dt.replace(tzinfo=_tz.utc)
+            except ValueError:
+                messagebox.showerror("Bad date", "Use YYYY-MM-DD format.")
+                return
+            try:
+                cred = make_credential(self.cfg)
+                detail = ""
+                if item.source == "AppRegistration":
+                    if item.kind != "ClientSecret":
+                        messagebox.showinfo("Not supported",
+                            "Only client secrets can be renewed from here.")
+                        return
+                    obj_id = find_app_object_id(cred, app_id=item.identifier)
+                    res = add_app_password(cred,
+                        app_object_id=obj_id,
+                        display_name=display_name_var.get().strip() or "renewed",
+                        end_date=new_dt)
+                    new_secret = res.get("secretText") or ""
+                    detail = f"new keyId={res.get('keyId')}"
+                    self._show_secret_once(dlg, new_secret)
+                elif item.source == "KeyVault":
+                    if item.kind == "Secret":
+                        renew_keyvault_secret_expiry(cred,
+                            vault_name=item.container, secret_name=item.name,
+                            new_expires_on=new_dt)
+                    elif item.kind == "Key":
+                        renew_keyvault_key_expiry(cred,
+                            vault_name=item.container, key_name=item.name,
+                            new_expires_on=new_dt)
+                    elif item.kind == "Certificate":
+                        renew_keyvault_certificate_expiry(cred,
+                            vault_name=item.container, cert_name=item.name,
+                            new_expires_on=new_dt)
+                    detail = f"new_expires_on={new_dt.isoformat()}"
+                    messagebox.showinfo("Updated",
+                        f"Expiry updated to {new_date_var.get()}.")
+                audit_event(str(config_store.audit_log_path()),
+                            actor=self.current_user, role=self.current_role.value,
+                            action=f"renew_{item.source}_{item.kind}".lower(),
+                            target=f"{item.container}/{item.name}",
+                            success=True, detail=detail)
+                if item.source != "AppRegistration":
+                    dlg.destroy()
+                    self.scan_now()
+            except Exception as exc:
+                audit_event(str(config_store.audit_log_path()),
+                            actor=self.current_user, role=self.current_role.value,
+                            action=f"renew_{item.source}_{item.kind}".lower(),
+                            target=f"{item.container}/{item.name}",
+                            success=False, detail=str(exc))
+                messagebox.showerror("Renew failed", str(exc))
+
+        tb.Button(bar, text="Cancel", bootstyle="secondary-outline",
+                  command=dlg.destroy).pack(side=RIGHT)
+        tb.Button(bar, text="🔁  Renew", bootstyle="success",
+                  command=commit).pack(side=RIGHT, padx=(0, 8))
+
+    def _show_secret_once(self, parent, secret: str) -> None:
+        dlg = tb.Toplevel(parent)
+        dlg.title("New client secret — copy now")
+        dlg.transient(parent)
+        dlg.grab_set()
+        dlg.geometry("560x220")
+        tb.Label(dlg, bootstyle="warning",
+                 text=("⚠  This is the only time you will see this value. "
+                       "Copy it into the consuming system, then close.")
+                 ).pack(anchor="w", padx=14, pady=(14, 8))
+        txt = tk.Text(dlg, height=4, font=("Consolas", 10), wrap="char")
+        txt.insert("1.0", secret)
+        txt.configure(state="disabled")
+        txt.pack(fill=X, padx=14)
+
+        def copy():
+            self.clipboard_clear()
+            self.clipboard_append(secret)
+        bar = tb.Frame(dlg, padding=(14, 12, 14, 14))
+        bar.pack(fill=X)
+        tb.Button(bar, text="Close", bootstyle="secondary",
+                  command=dlg.destroy).pack(side=RIGHT)
+        tb.Button(bar, text="Copy to clipboard", bootstyle="primary",
+                  command=copy).pack(side=RIGHT, padx=(0, 8))
+
     # =====================================================================
     # Helpers
     # =====================================================================
@@ -399,6 +770,18 @@ class App(tb.Window):
         return self.cfg
 
     def save_settings(self) -> None:
+        # Settings span three permission domains; require at least Contributor
+        # to save scan-scope / notifications, and Admin to overwrite the
+        # Azure connection. Block early if the user has none of these.
+        allowed = any(perms.can(self.current_role, p) for p in (
+            Permission.EDIT_AZURE_CONN, Permission.EDIT_NOTIFICATIONS,
+            Permission.EDIT_SCAN_SCOPE))
+        if not allowed:
+            messagebox.showinfo(
+                "Read-only",
+                "Your role can view settings but cannot save them. "
+                "Ask an Admin to promote you.")
+            return
         self._gather_settings()
         try:
             config_store.save_config(self.cfg)
@@ -406,6 +789,9 @@ class App(tb.Window):
             messagebox.showerror("Save failed", str(exc))
             return
         self._restart_scheduler()
+        audit_event(str(config_store.audit_log_path()),
+                    actor=self.current_user, role=self.current_role.value,
+                    action="save_settings", target="config.json", success=True)
         self.status_var.set(f"● Settings saved to {config_store.config_dir()}")
 
     def scan_now(self) -> None:
@@ -472,6 +858,11 @@ class App(tb.Window):
             messagebox.showerror("Email failed", str(exc))
 
     def install_scheduled_task(self) -> None:
+        if not perms.can(self.current_role, Permission.INSTALL_TASK):
+            messagebox.showinfo(
+                "Permission required",
+                "Only Admins can install the Scheduled Task.")
+            return
         from pathlib import Path
         import subprocess
         script = Path(__file__).parent.parent / "windows" / "Install-ScheduledTask.ps1"
