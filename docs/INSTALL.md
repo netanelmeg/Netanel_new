@@ -27,6 +27,7 @@ Windows Server, from a clean machine through your first notification.
 15. [Renewing / extending credentials](#15-renewing--extending-credentials)
 16. [Troubleshooting](#16-troubleshooting)
 17. [Appendix: file locations and exit codes](#17-appendix-file-locations-and-exit-codes)
+18. [Security model & least-privilege checklist](#18-security-model--least-privilege-checklist)
 
 ---
 
@@ -180,6 +181,28 @@ want to be able to renew:
 > item types instead.
 
 ---
+
+## 8a. Initialize machine-wide permissions (one-time)
+
+The role assignments file and the audit log live in `%ProgramData%\AzureSecretMonitor\`
+on purpose — anything per-user could be edited by the user and bypass the
+role model. Run this **once, as an Administrator**, before the first GUI
+launch:
+
+```powershell
+cd C:\AzureSecretMonitor\windows
+powershell -ExecutionPolicy Bypass -File .\Initialize-Permissions.ps1
+```
+
+It creates the directory, drops a default `roles.json` (`{"*": "reader"}`),
+and sets ACLs:
+
+- `roles.json` — read by everyone, write by **Administrators only**
+- `logs\audit.log` — append by anyone running the app, read by all,
+  full control to Administrators
+
+After this runs once, normal users launching the GUI get the **Reader**
+role until an Administrator promotes them.
 
 ## 9. Launch the GUI and configure
 
@@ -350,9 +373,10 @@ Roles are inherited — Admin gets all of Contributor's powers and so on.
 
 ### Bootstrapping
 
-The first Windows user to launch the GUI is auto-promoted to **Admin** so
-the install isn't unmanageable. Add the rest of your team via the
-**+ Assign user…** button on the Permissions page.
+The first **Windows Administrator** who launches the GUI is auto-promoted to
+**Admin** in the app, so the install isn't unmanageable. Non-admin users
+remain Reader until an Admin promotes them. This requires
+`Initialize-Permissions.ps1` to have been run once (section 8a).
 
 ### Adding / changing users
 
@@ -365,10 +389,16 @@ Removing a user falls them back to the `*` (default) role.
 
 ### Where it lives
 
-Role assignments are stored at
-`%APPDATA%\AzureSecretMonitor\roles.json` (per user). Anyone who can write
-to that file can change roles — this is **UI-level gating**, not a security
-boundary. The real boundary is the service principal's Azure permissions.
+Role assignments are stored at `%ProgramData%\AzureSecretMonitor\roles.json`,
+ACL-restricted by `Initialize-Permissions.ps1` so only Windows
+Administrators can write to it. This means a non-admin user cannot promote
+themselves by editing their own profile.
+
+The hierarchy is layered defense:
+
+1. **NTFS ACL** on `roles.json` (Administrators-only writable)
+2. **GUI role check** before showing destructive controls
+3. **Service principal** Azure permissions (the only thing enforced server-side)
 
 ### Audit log
 
@@ -499,3 +529,48 @@ Remove-Item -Recurse C:\AzureSecretMonitor
 
 And, in Entra ID, delete the client secret (and optionally the whole app
 registration) to revoke access.
+
+---
+
+## 18. Security model & least-privilege checklist
+
+| Layer | What enforces it | What to grant |
+|---|---|---|
+| **Azure scan (read)** | Service principal API permissions | Graph `Application.Read.All`; KV roles **Reader + Secrets/Crypto/Certificate User** |
+| **Azure renew (write)** | Service principal API permissions | Graph `Application.ReadWrite.OwnedBy` *(preferred over `.All`)*; KV **Officer** roles **only** for item types you want renewable |
+| **Local UI gating** | `permissions.py` role check | Local Windows account assigned to Reader/Contributor/Admin |
+| **Role-file integrity** | NTFS ACL on `%ProgramData%\AzureSecretMonitor\roles.json` | Admin via `Initialize-Permissions.ps1` |
+| **Client-secret confidentiality** | Windows DPAPI (CurrentUser) | Per-user; secret is decryptable only by the user that saved it |
+| **SMTP password** | Windows DPAPI (CurrentUser) | Same as above |
+| **Audit log integrity** | NTFS ACL on `logs/audit.log` + length-bounded fields | Ship to a SIEM for tamper-evidence |
+
+**Minimum-impact deployment** (read-only monitoring, no renewal):
+
+- Service principal: only `Application.Read.All` + Key Vault read roles.
+- Everyone is **Reader**. Don't run `Initialize-Permissions.ps1` if you
+  don't need a writable role file at all — but you also won't get the audit log.
+
+**Contributor-enabled deployment** (renewal allowed):
+
+- Add `Application.ReadWrite.OwnedBy` to the SP — **not `.All`** unless you
+  truly need to manage every app.
+- Add KV Officer roles **only** for the item types you intend to renew.
+- Promote a small number of platform engineers to **Contributor**.
+
+**Admin-restricted deployment** (multi-team server):
+
+- Keep all renewal scope on a separate SP used only by Admins.
+- Restrict Contributor role to nobody (or the empty set).
+- Run `Initialize-Permissions.ps1` so only Windows Administrators can
+  even change role assignments.
+
+### Notes on what the local roles do **not** protect
+
+- A user with **local file-system Admin** rights can edit `roles.json` or
+  the DPAPI blob's owning profile and effectively become Admin in the app.
+  The whole machine is the trust boundary.
+- A user with the **same Windows account** that saved the client secret can
+  always decrypt it (DPAPI is profile-bound). Don't share Windows accounts.
+- The service principal credentials themselves are the ultimate authority.
+  Treat the SP secret like a vault root key: rotate periodically and limit
+  who can read `%APPDATA%\AzureSecretMonitor\secret.bin`.

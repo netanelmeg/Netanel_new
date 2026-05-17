@@ -151,12 +151,21 @@ def can(role: Role, permission: Permission) -> bool:
     return permission in effective_permissions(role)
 
 
-def bootstrap_if_empty(assignments: RoleAssignments) -> bool:
-    """If no Admin exists yet, promote the current user to Admin.
+def bootstrap_if_empty(assignments: RoleAssignments, *,
+                       is_os_admin: bool) -> bool:
+    """Promote the current user to Admin **only** if they are an OS Administrator
+    and no Admin is already assigned.
+
+    Without the OS-admin gate, any user could become Admin in the app simply
+    by launching it first under their own profile — defeating the whole role
+    model. This way the very first promotion requires a Windows
+    Administrator (matching the ACL on roles.json).
 
     Returns True if a bootstrap promotion happened.
     """
     if any(r == Role.ADMIN for r in assignments.mapping.values()):
+        return False
+    if not is_os_admin:
         return False
     assignments.set(current_username(), Role.ADMIN)
     return True

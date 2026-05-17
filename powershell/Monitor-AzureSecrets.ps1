@@ -71,7 +71,7 @@ function Get-Status {
     return 'OK'
 }
 
-function New-Item {
+function New-MonitorItem {
     param($Source, $Kind, $Name, $Container, [datetime]$ExpiresOn, $Identifier)
     $days = [int][math]::Floor(($ExpiresOn.ToUniversalTime() - (Get-Date).ToUniversalTime()).TotalDays)
     [pscustomobject]@{
@@ -100,7 +100,7 @@ function Get-AppRegistrationCredentials {
         foreach ($pwd in $passwords) {
             if ($pwd.EndDateTime) {
                 $kind = if ($pwd.Type -and $pwd.Type -match 'AsymmetricX509Cert') { 'Certificate' } else { 'ClientSecret' }
-                $items.Add((New-Item -Source 'AppRegistration' -Kind $kind `
+                $items.Add((New-MonitorItem -Source 'AppRegistration' -Kind $kind `
                     -Name ($pwd.DisplayName ?? $pwd.KeyId.ToString()) `
                     -Container $app.DisplayName `
                     -ExpiresOn $pwd.EndDateTime `
@@ -118,21 +118,21 @@ function Get-KeyVaultItems {
 
     foreach ($s in Get-AzKeyVaultSecret -VaultName $VaultName) {
         if ($s.Expires) {
-            $items.Add((New-Item -Source 'KeyVault' -Kind 'Secret' `
+            $items.Add((New-MonitorItem -Source 'KeyVault' -Kind 'Secret' `
                 -Name $s.Name -Container $VaultName -ExpiresOn $s.Expires `
                 -Identifier $s.Id)) | Out-Null
         }
     }
     foreach ($k in Get-AzKeyVaultKey -VaultName $VaultName) {
         if ($k.Expires) {
-            $items.Add((New-Item -Source 'KeyVault' -Kind 'Key' `
+            $items.Add((New-MonitorItem -Source 'KeyVault' -Kind 'Key' `
                 -Name $k.Name -Container $VaultName -ExpiresOn $k.Expires `
                 -Identifier $k.Id)) | Out-Null
         }
     }
     foreach ($c in Get-AzKeyVaultCertificate -VaultName $VaultName) {
         if ($c.Expires) {
-            $items.Add((New-Item -Source 'KeyVault' -Kind 'Certificate' `
+            $items.Add((New-MonitorItem -Source 'KeyVault' -Kind 'Certificate' `
                 -Name $c.Name -Container $VaultName -ExpiresOn $c.Expires `
                 -Identifier $c.Id)) | Out-Null
         }

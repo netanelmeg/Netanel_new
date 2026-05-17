@@ -49,6 +49,11 @@ _stub("msgraph_core", GraphClient=lambda credential: types.SimpleNamespace(
 _stub("requests", post=lambda *a, **kw: types.SimpleNamespace(
     raise_for_status=lambda: None))
 
+# Force the dev fallback to keep working on Linux Xvfb (no DPAPI, no
+# %ProgramData%). Pre-load these env vars so config_store points at a temp dir.
+import tempfile  # noqa: E402
+os.environ.setdefault("ProgramData", tempfile.mkdtemp(prefix="asm-system-"))
+
 # --- Now safe to import the app ---------------------------------------------
 
 import gui  # noqa: E402
