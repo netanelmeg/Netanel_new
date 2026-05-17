@@ -6,7 +6,7 @@ sample items, and captures each tab as a PNG via xwd + ImageMagick.
 
 Run under a virtual display:
 
-    xvfb-run -a -s '-screen 0 1280x800x24' python3.12 docs/screenshot.py
+    xvfb-run -a -s '-screen 0 1400x900x24' python3.12 docs/screenshot.py
 
 Outputs to docs/screenshots/.
 """
@@ -118,7 +118,7 @@ def main() -> None:
     app.update_idletasks()
     app.update()
 
-    for name in ["dashboard", "azure", "notifications", "scheduler"]:
+    for name in ["dashboard", "azure", "notifications", "scheduler", "permissions"]:
         app._show_page(name)
         app.update_idletasks()
         app.update()

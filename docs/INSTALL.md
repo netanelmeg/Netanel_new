@@ -23,8 +23,10 @@ Windows Server, from a clean machine through your first notification.
 11. [Run your first scan](#11-run-your-first-scan)
 12. [Install the Windows Scheduled Task](#12-install-the-windows-scheduled-task)
 13. [Verify everything works](#13-verify-everything-works)
-14. [Troubleshooting](#14-troubleshooting)
-15. [Appendix: file locations and exit codes](#15-appendix-file-locations-and-exit-codes)
+14. [Role-based permissions](#14-role-based-permissions)
+15. [Renewing / extending credentials](#15-renewing--extending-credentials)
+16. [Troubleshooting](#16-troubleshooting)
+17. [Appendix: file locations and exit codes](#17-appendix-file-locations-and-exit-codes)
 
 ---
 
@@ -125,32 +127,57 @@ Keep those three values handy: **tenant ID**, **client ID**, **secret value**.
 ## 7. Grant Microsoft Graph permission
 
 The app needs to list all application registrations and read their
-credentials.
+credentials. If you intend to also **renew** app-registration secrets from
+inside the GUI, grant one of the write permissions below as well.
 
 1. Left nav → **API permissions** → **+ Add a permission** →
    **Microsoft Graph** → **Application permissions**.
-2. Search for `Application.Read.All`, tick it, click **Add permissions**.
-3. Click **Grant admin consent for <your tenant>** (a tenant admin must do
+2. Tick the permissions you want:
+
+   | Permission | Required for |
+   |---|---|
+   | `Application.Read.All` | Read-only monitoring (always required). |
+   | `Application.ReadWrite.OwnedBy` | Renewing client secrets on app registrations the SP owns (recommended). |
+   | `Application.ReadWrite.All` | Renewing client secrets on **any** app in the tenant (broader, riskier). |
+
+3. Click **Add permissions**.
+4. Click **Grant admin consent for <your tenant>** (a tenant admin must do
    this once). The status should turn green.
 
-> No delegated user permissions are required.
+> Grant only what you'll actually use. If nobody on the team should be able
+> to issue new app-registration secrets from this tool, skip the
+> `ReadWrite` permissions entirely — the local **Contributor** role will
+> still attempt the call but Azure will reject it (and the rejection is
+> recorded in the audit log).
 
 ---
 
 ## 8. Grant Key Vault permission
 
-Do this for **each** Key Vault you want monitored. The simplest path is RBAC:
+Do this for **each** Key Vault you want monitored. The simplest path is RBAC.
+
+### Read-only (monitoring only)
 
 1. Open the Key Vault → **Access control (IAM)** → **+ Add role assignment**.
 2. Assign **Key Vault Reader** to the service principal `azure-secret-monitor`.
-3. Repeat and assign these data-plane roles so the app can list metadata:
+3. Repeat and assign the data-plane reader roles:
    - **Key Vault Secrets User**
    - **Key Vault Crypto User**
    - **Key Vault Certificate User**
 
-> If your vault still uses **Access Policies** instead of RBAC: open
-> **Access policies** → **Create**, pick `azure-secret-monitor`, and grant
-> `Get` and `List` on Secrets, Keys, and Certificates.
+### Read + renew (extend expiries from inside the GUI)
+
+Additionally assign the matching **officer** roles for the item types you
+want to be able to renew:
+
+| To renew… | Add this role |
+|---|---|
+| Secrets   | **Key Vault Secrets Officer** |
+| Keys      | **Key Vault Crypto Officer** |
+| Certificates | **Key Vault Certificates Officer** |
+
+> Access-policy mode: grant `Get` + `List` + `Update` on the corresponding
+> item types instead.
 
 ---
 
@@ -306,7 +333,93 @@ Confirm a Teams card and/or email arrived.
 
 ---
 
-## 14. Troubleshooting
+## 14. Role-based permissions
+
+The GUI enforces a three-tier role model on top of Azure's own permissions.
+Open the **🛡 Permissions** page in the sidebar.
+
+![Permissions tab](screenshots/permissions.png)
+
+| Role | Sees | Can change | Typical user |
+|---|---|---|---|
+| **Reader** | Dashboard, scans, settings (read-only) | Send test notifications | On-call viewers, auditors |
+| **Contributor** | Reader + can renew/extend credentials | Edit notification and scan-scope settings | Platform engineers |
+| **Admin** | Contributor + Azure connection + Scheduled Task + role management | Everything | Security / IAM owners |
+
+Roles are inherited — Admin gets all of Contributor's powers and so on.
+
+### Bootstrapping
+
+The first Windows user to launch the GUI is auto-promoted to **Admin** so
+the install isn't unmanageable. Add the rest of your team via the
+**+ Assign user…** button on the Permissions page.
+
+### Adding / changing users
+
+1. On the Permissions tab, click **+ Assign user…**.
+2. Type the Windows username (the local `SAMAccountName`, case-insensitive)
+   or `*` to change the default for everyone not explicitly listed.
+3. Pick the role, click **Assign**.
+
+Removing a user falls them back to the `*` (default) role.
+
+### Where it lives
+
+Role assignments are stored at
+`%APPDATA%\AzureSecretMonitor\roles.json` (per user). Anyone who can write
+to that file can change roles — this is **UI-level gating**, not a security
+boundary. The real boundary is the service principal's Azure permissions.
+
+### Audit log
+
+Every role change, settings save, and credential renewal is appended as a
+JSON line to:
+
+```
+%ProgramData%\AzureSecretMonitor\logs\audit.log
+```
+
+Each record: timestamp, Windows user, role, action, target, success
+flag, and a short detail string. Ship that file to your SIEM if you need
+central audit.
+
+---
+
+## 15. Renewing / extending credentials
+
+> Requires the **Contributor** role (or higher) and the Azure write
+> permissions from sections 7–8.
+
+1. Right-click any row on the Dashboard (or double-click).
+2. The **Renew / extend** dialog opens for that credential.
+
+### App registration client secrets
+
+- A new client secret is **created** on the app registration via
+  `POST /applications/{id}/addPassword`. Azure returns the value once; the
+  GUI shows it in a one-shot "Copy to clipboard" modal.
+- The **old** secret is intentionally left in place — rotate the consuming
+  service to the new value first, then remove the old one in the Azure
+  portal once you've confirmed nothing is using it.
+
+### Key Vault items
+
+- For a **secret** / **key** / **certificate**, the dialog updates the
+  `expires_on` property on the existing version. The underlying secret
+  material is unchanged.
+- If the secret value itself is compromised, rotate it in the portal first,
+  then re-bump the expiry here.
+
+### Audit
+
+Every renewal call writes one line to `audit.log` whether it succeeded or
+failed (with the Azure error message in `detail`). If a Contributor
+attempts a renewal but the SP doesn't have the matching write role, the
+call fails on Azure's side and is recorded.
+
+---
+
+## 16. Troubleshooting
 
 | Symptom | Fix |
 |---|---|
@@ -328,7 +441,7 @@ python cli.py -v
 
 ---
 
-## 15. Appendix: file locations and exit codes
+## 17. Appendix: file locations and exit codes
 
 ### File layout
 
@@ -355,9 +468,11 @@ C:\AzureSecretMonitor\
   secret.bin      client secret, DPAPI-encrypted
   smtp.bin        SMTP password, DPAPI-encrypted
   state.json      last-notified severity per item
+  roles.json      Windows user → role assignments
 
 %ProgramData%\AzureSecretMonitor\logs\  # machine-wide
   cli.log         Scheduled Task output
+  audit.log       role changes + credential renewals (JSON lines)
 ```
 
 ### CLI flags

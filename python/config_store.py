@@ -42,6 +42,18 @@ def config_dir() -> Path:
 def config_path() -> Path: return config_dir() / "config.json"
 def secret_path() -> Path: return config_dir() / "secret.bin"
 def state_path() -> Path:  return config_dir() / "state.json"
+def roles_path() -> Path:  return config_dir() / "roles.json"
+
+
+def audit_log_path() -> Path:
+    """Machine-wide audit log; readable by anyone, writable by current user."""
+    if sys.platform == "win32":
+        base = os.environ.get("ProgramData") or r"C:\ProgramData"
+        path = Path(base) / APP_NAME / "logs"
+    else:
+        path = Path.home() / ".local" / "share" / "azure-secret-monitor" / "logs"
+    path.mkdir(parents=True, exist_ok=True)
+    return path / "audit.log"
 
 
 # --- DPAPI (Windows) --------------------------------------------------------
@@ -190,3 +202,22 @@ def load_state() -> dict:
 
 def save_state(state: dict) -> None:
     state_path().write_text(json.dumps(state, indent=2), encoding="utf-8")
+
+
+# --- role assignments -------------------------------------------------------
+
+def load_roles() -> dict:
+    rp = roles_path()
+    if not rp.exists():
+        return {}
+    try:
+        return json.loads(rp.read_text(encoding="utf-8"))
+    except Exception as exc:
+        LOG.error("Failed to load role assignments: %s", exc)
+        return {}
+
+
+def save_roles(roles: dict) -> None:
+    rp = roles_path()
+    rp.write_text(json.dumps(roles, indent=2, sort_keys=True), encoding="utf-8")
+    _restrict_perms(rp)

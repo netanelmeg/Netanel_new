@@ -33,6 +33,14 @@ register a Windows daily task that runs `cli.py` unattended.
 
 ![Scheduler tab](docs/screenshots/scheduler.png)
 
+### Permissions tab
+Three-tier role model (Reader → Contributor → Admin) with a permissions
+tree, user assignments, and a capability matrix. The first Windows user to
+launch is auto-promoted to Admin; every role change and credential renewal
+is appended to `audit.log`.
+
+![Permissions tab](docs/screenshots/permissions.png)
+
 
 ```
 +------------------+        +-----------------------+        +---------------------+

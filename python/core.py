@@ -298,6 +298,112 @@ def notify_teams(webhook_url: str, items: list[ExpiringItem]) -> None:
     r.raise_for_status()
 
 
+# --- lifecycle (renew / extend) --------------------------------------------
+
+def add_app_password(credential: ClientSecretCredential, *,
+                     app_object_id: str, display_name: str,
+                     end_date: datetime) -> dict:
+    """Add a new password credential to an existing Entra ID app registration.
+
+    Returns the Graph response — including the one-time `secretText` — which
+    the caller is expected to surface to the operator immediately. The value
+    is never persisted.
+
+    Requires Graph permission `Application.ReadWrite.OwnedBy` (or
+    `Application.ReadWrite.All`) for the calling SP.
+    """
+    client = GraphClient(credential=credential)
+    body = {
+        "passwordCredential": {
+            "displayName": display_name,
+            "endDateTime": _aware(end_date).isoformat().replace("+00:00", "Z"),
+        }
+    }
+    url = f"https://graph.microsoft.com/v1.0/applications/{app_object_id}/addPassword"
+    resp = client.post(url, json=body)
+    if resp.status_code >= 300:
+        raise RuntimeError(f"addPassword failed {resp.status_code}: {resp.text}")
+    return resp.json()
+
+
+def find_app_object_id(credential: ClientSecretCredential, *, app_id: str) -> str:
+    """Resolve an app registration's `appId` (client ID) to its object ID."""
+    client = GraphClient(credential=credential)
+    url = (f"https://graph.microsoft.com/v1.0/applications"
+           f"?$filter=appId eq '{app_id}'&$select=id,appId")
+    resp = client.get(url)
+    if resp.status_code >= 300:
+        raise RuntimeError(f"applications lookup failed {resp.status_code}: {resp.text}")
+    values = resp.json().get("value", [])
+    if not values:
+        raise RuntimeError(f"No application with appId {app_id}")
+    return values[0]["id"]
+
+
+def renew_keyvault_secret_expiry(credential: ClientSecretCredential, *,
+                                 vault_name: str, secret_name: str,
+                                 new_expires_on: datetime) -> None:
+    vault_url = f"https://{vault_name}.vault.azure.net"
+    client = SecretClient(vault_url=vault_url, credential=credential)
+    secret = client.get_secret(secret_name)
+    client.update_secret_properties(
+        secret_name, version=secret.properties.version,
+        expires_on=_aware(new_expires_on),
+    )
+
+
+def renew_keyvault_key_expiry(credential: ClientSecretCredential, *,
+                              vault_name: str, key_name: str,
+                              new_expires_on: datetime) -> None:
+    vault_url = f"https://{vault_name}.vault.azure.net"
+    client = KeyClient(vault_url=vault_url, credential=credential)
+    key = client.get_key(key_name)
+    client.update_key_properties(
+        key_name, version=key.properties.version,
+        expires_on=_aware(new_expires_on),
+    )
+
+
+def renew_keyvault_certificate_expiry(credential: ClientSecretCredential, *,
+                                      vault_name: str, cert_name: str,
+                                      new_expires_on: datetime) -> None:
+    """Bump the `expires_on` on the certificate's properties.
+
+    Note: this only updates the metadata. To actually issue a new certificate
+    use the vault's certificate policy via `begin_create_certificate`.
+    """
+    vault_url = f"https://{vault_name}.vault.azure.net"
+    client = CertificateClient(vault_url=vault_url, credential=credential)
+    cert = client.get_certificate(cert_name)
+    client.update_certificate_properties(
+        cert_name, version=cert.properties.version,
+        expires_on=_aware(new_expires_on),
+    )
+
+
+# --- audit log --------------------------------------------------------------
+
+def audit_event(log_path: str, *, actor: str, role: str, action: str,
+                target: str, success: bool, detail: str = "") -> None:
+    """Append a single JSON-line audit event."""
+    import json
+    record = {
+        "ts": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "actor": actor,
+        "role": role,
+        "action": action,
+        "target": target,
+        "success": success,
+        "detail": detail,
+    }
+    try:
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record) + "\n")
+    except OSError as exc:
+        LOG.error("Could not write audit log %s: %s", log_path, exc)
+
+
 def severity_rank(status: str) -> int:
     return {"OK": 0, "WARNING": 1, "CRITICAL": 2, "EXPIRED": 3}.get(status, -1)
 
