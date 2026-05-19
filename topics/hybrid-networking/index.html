@@ -20,6 +20,7 @@
   <button class="scenario-btn" data-scenario="spoke-to-onprem">Spoke-A → On-prem (by IP)</button>
   <button class="scenario-btn" data-scenario="dns-resolution">DNS: resolve on-prem name</button>
   <button class="scenario-btn" data-scenario="internet-out">Spoke-A → Internet</button>
+  <button id="quiz-btn" class="scenario-btn" style="margin-left:auto">📝 Quiz</button>
 </div>
 
 <main>
@@ -43,11 +44,20 @@
 
 <script src="data/nodes.js"></script>
 <script src="data/scenarios.js"></script>
+<script src="data/quiz.js"></script>
 <script src="js/map.js"></script>
 <script src="js/interactions.js"></script>
+<script src="js/quiz.js"></script>
 <script>
   loadMap('map-container', 'maps/hybrid-networking.svg')
-    .then(svg => initInteractions(svg))
+    .then(svg => {
+      initInteractions(svg);
+      document.getElementById('quiz-btn').addEventListener('click', () => {
+        startQuiz(svg, () => {
+          document.querySelector('[data-scenario="explore"]').click();
+        });
+      });
+    })
     .catch(err => {
       document.getElementById('map-container').innerHTML =
         '<p style="padding:16px;color:#993C1D">Failed to load map. Make sure you\'re serving the files over HTTP — see the README for instructions.</p>';
