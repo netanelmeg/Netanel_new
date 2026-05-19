@@ -1,3 +1,46 @@
+# Azure Networking — Interactive Learning App
+
+An interactive, browser-based learning tool for Azure hybrid networking. Tap nodes to explore concepts; pick traffic-flow scenarios to watch packets traverse the hub-and-spoke topology in real time.
+
+## Running locally
+
+The map SVG is loaded via `fetch()`, which requires an HTTP server — opening `index.html` directly in Chrome as a `file://` URL will fail with a network error. Firefox works without a server, but use one anyway.
+
+**Quickest method (Python 3, no install needed):**
+```bash
+cd /path/to/this-repo
+python3 -m http.server 8080
+```
+Then open **http://localhost:8080** in your browser.
+
+**Alternatively — Node.js:**
+```bash
+npx serve .
+```
+
+**VS Code:** right-click `index.html` → "Open with Live Server" (requires the Live Server extension).
+
+GitHub Pages serves over HTTPS so `fetch()` works there automatically.
+
+## Project structure
+
+```
+index.html                              # Topic index (start here)
+styles.css                              # Shared styles
+topics/
+  hybrid-networking/
+    index.html                          # Hybrid networking learning page
+    maps/hybrid-networking.svg          # SVG diagram
+    data/nodes.js                       # Node descriptions & gotchas
+    data/scenarios.js                   # Traffic-flow scenario scripts
+    js/map.js                           # SVG loader + visual state API
+    js/interactions.js                  # Event handlers + panel rendering
+```
+
+To add a new topic: create a new folder under `topics/`, follow the same structure, and add a card to the root `index.html`.
+
+---
+
 # Azure Secret Expiration Monitor (Windows on-prem GUI)
 
 A Windows Server desktop application that scans Azure for expiring secrets and
