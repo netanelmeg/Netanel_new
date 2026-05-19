@@ -1,14 +1,53 @@
-function startQuiz(svg, onExit) {
+function startQuiz(svg, onExit, setQuizActive) {
   const panel = document.getElementById('panel');
-  const controls = document.getElementById('controls');
-  const questions = QUIZ_QUESTIONS.slice(); // shallow copy so we can shuffle
+  const quizBtn = document.getElementById('quiz-btn');
+
+  const questions = typeof QUIZ_QUESTIONS !== 'undefined' ? QUIZ_QUESTIONS.slice() : [];
+
+  if (questions.length === 0) {
+    panel.innerHTML = `
+      <span class="tag">QUIZ</span>
+      <h2>No questions yet</h2>
+      <p>Quiz questions are coming soon. Explore the map for now!</p>
+      <button class="scenario-btn" id="quiz-exit-empty">← Back to explore</button>
+    `;
+    document.getElementById('quiz-exit-empty').addEventListener('click', onExit);
+    return;
+  }
+
+  // Warn about broken node/arrow references without crashing the quiz
+  questions.forEach((q, i) => {
+    if (!Array.isArray(q.options) || q.options.length !== 4)
+      console.warn(`[Quiz] Q${i + 1}: expected 4 options`);
+    if (q.correct < 0 || q.correct > 3)
+      console.warn(`[Quiz] Q${i + 1}: correct index out of range`);
+    (q.highlightNodes || []).forEach(id => {
+      if (!svg.querySelector(`[data-node="${id}"]`))
+        console.warn(`[Quiz] Q${i + 1}: node "${id}" not found in SVG`);
+    });
+    (q.highlightArrows || []).forEach(id => {
+      if (!svg.querySelector(`[data-arrow="${id}"]`))
+        console.warn(`[Quiz] Q${i + 1}: arrow "${id}" not found in SVG`);
+    });
+  });
+
   shuffle(questions);
 
   let index = 0;
   let score = 0;
   let answered = false;
 
-  controls.classList.add('quiz-active');
+  function enter() {
+    if (setQuizActive) setQuizActive(true);
+    if (quizBtn) quizBtn.disabled = true;
+  }
+
+  function exit() {
+    if (setQuizActive) setQuizActive(false);
+    if (quizBtn) quizBtn.disabled = false;
+    clearAllStates(svg);
+    onExit();
+  }
 
   function render() {
     if (index >= questions.length) {
@@ -18,8 +57,8 @@ function startQuiz(svg, onExit) {
     const q = questions[index];
     clearAllStates(svg);
     dimAll(svg);
-    highlightNodes(svg, q.highlightNodes);
-    animateArrows(svg, q.highlightArrows);
+    highlightNodes(svg, q.highlightNodes || []);
+    animateArrows(svg, q.highlightArrows || []);
 
     answered = false;
     panel.innerHTML = `
@@ -27,6 +66,7 @@ function startQuiz(svg, onExit) {
         <span class="tag">QUIZ</span>
         <span class="quiz-progress">Q ${index + 1} / ${questions.length}</span>
         <span class="quiz-score-inline">${score} correct</span>
+        <button class="quiz-exit-btn" id="quiz-exit-now" aria-label="Exit quiz">✕ Exit</button>
       </div>
       <p class="quiz-question">${q.question}</p>
       <div class="quiz-options">
@@ -34,12 +74,16 @@ function startQuiz(svg, onExit) {
           <button class="quiz-option" data-index="${i}">${opt}</button>
         `).join('')}
       </div>
-      <div class="quiz-feedback" id="quiz-feedback"></div>
+      <div class="quiz-feedback" id="quiz-feedback" aria-live="polite"></div>
     `;
 
-    panel.querySelectorAll('.quiz-option').forEach(btn => {
+    document.getElementById('quiz-exit-now').addEventListener('click', exit);
+
+    const optionBtns = panel.querySelectorAll('.quiz-option');
+    optionBtns.forEach(btn => {
       btn.addEventListener('click', () => handleAnswer(parseInt(btn.dataset.index)));
     });
+    if (optionBtns.length) optionBtns[0].focus();
   }
 
   function handleAnswer(chosen) {
@@ -52,13 +96,18 @@ function startQuiz(svg, onExit) {
 
     panel.querySelectorAll('.quiz-option').forEach((btn, i) => {
       btn.disabled = true;
-      if (i === q.correct)  btn.classList.add('correct');
-      if (i === chosen && !isCorrect) btn.classList.add('wrong');
+      if (i === q.correct) {
+        btn.classList.add('correct');
+        btn.textContent = '✓ ' + btn.textContent;
+      } else if (i === chosen) {
+        btn.classList.add('wrong');
+        btn.textContent = '✗ ' + btn.textContent;
+      }
     });
 
     document.getElementById('quiz-feedback').innerHTML = `
       <div class="${isCorrect ? 'tip' : 'gotcha'}">
-        ${isCorrect ? '✅ <strong>Correct!</strong>' : '❌ <strong>Not quite.</strong>'}
+        <strong>${isCorrect ? 'Correct!' : 'Not quite.'}</strong>
         ${q.explanation}
       </div>
       <button class="quiz-next-btn" id="quiz-next">
@@ -66,10 +115,12 @@ function startQuiz(svg, onExit) {
       </button>
     `;
 
-    document.getElementById('quiz-next').addEventListener('click', () => {
+    const nextBtn = document.getElementById('quiz-next');
+    nextBtn.addEventListener('click', () => {
       index++;
       render();
     });
+    nextBtn.focus();
   }
 
   function renderResults() {
@@ -99,12 +150,10 @@ function startQuiz(svg, onExit) {
       score = 0;
       render();
     });
-    document.getElementById('quiz-exit').addEventListener('click', () => {
-      controls.classList.remove('quiz-active');
-      onExit();
-    });
+    document.getElementById('quiz-exit').addEventListener('click', exit);
   }
 
+  enter();
   render();
 }
 

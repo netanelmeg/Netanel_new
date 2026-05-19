@@ -2,6 +2,7 @@ function initInteractions(svg) {
   const panel = document.getElementById('panel');
   const controls = document.getElementById('controls');
   let currentScenario = 'explore';
+  let isQuizActive = false;
 
   function renderNodeDetails(nodeId) {
     const data = NODE_DATA[nodeId];
@@ -56,25 +57,26 @@ function initInteractions(svg) {
     panel.innerHTML = html;
   }
 
-  // Scenario button clicks
-  controls.querySelectorAll('.scenario-btn').forEach(btn => {
+  // Scenario button clicks — only buttons with data-scenario, so the quiz button is unaffected
+  controls.querySelectorAll('[data-scenario]').forEach(btn => {
     btn.addEventListener('click', () => {
-      controls.querySelectorAll('.scenario-btn').forEach(b => b.classList.remove('active'));
+      controls.querySelectorAll('[data-scenario]').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       currentScenario = btn.dataset.scenario;
       renderScenario(currentScenario);
     });
   });
 
-  // Node clicks
+  // Node clicks — blocked while quiz is active
   svg.querySelectorAll('.clickable').forEach(node => {
     node.addEventListener('click', e => {
       e.stopPropagation();
+      if (isQuizActive) return;
       const nodeId = node.dataset.node;
       if (!nodeId) return;
 
       if (currentScenario !== 'explore') {
-        controls.querySelectorAll('.scenario-btn').forEach(b => b.classList.remove('active'));
+        controls.querySelectorAll('[data-scenario]').forEach(b => b.classList.remove('active'));
         controls.querySelector('[data-scenario="explore"]').classList.add('active');
         currentScenario = 'explore';
         clearAllStates(svg);
@@ -86,4 +88,12 @@ function initInteractions(svg) {
   });
 
   renderScenario('explore');
+
+  return {
+    setQuizActive(flag) {
+      isQuizActive = flag;
+      controls.classList.toggle('quiz-active', flag);
+    },
+    renderScenario,
+  };
 }

@@ -51,11 +51,9 @@
 <script>
   loadMap('map-container', 'maps/hybrid-networking.svg')
     .then(svg => {
-      initInteractions(svg);
+      const api = initInteractions(svg);
       document.getElementById('quiz-btn').addEventListener('click', () => {
-        startQuiz(svg, () => {
-          document.querySelector('[data-scenario="explore"]').click();
-        });
+        startQuiz(svg, () => api.renderScenario('explore'), api.setQuizActive);
       });
     })
     .catch(err => {
