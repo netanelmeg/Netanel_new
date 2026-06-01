@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SysAdmin Tool – GUI Preview</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px; background: #f0f0f0; color: #1a1a1a; }
+
+  /* ── Window chrome ── */
+  .window {
+    width: 1100px; margin: 24px auto; background: #fff;
+    border: 1px solid #888; box-shadow: 0 4px 24px rgba(0,0,0,.28);
+    display: flex; flex-direction: column;
+  }
+  .titlebar {
+    background: #1a2433; color: #fff; padding: 7px 12px;
+    display: flex; align-items: center; justify-content: space-between; font-size: 12px;
+  }
+  .titlebar-btns span {
+    display: inline-block; width: 13px; height: 13px; border-radius: 50%;
+    margin-left: 6px; vertical-align: middle;
+  }
+  .tb-min { background: #fbc02d; }
+  .tb-max { background: #43a047; }
+  .tb-close { background: #e53935; }
+
+  /* ── Connection bar ── */
+  .connbar {
+    background: #1E3A5F; padding: 9px 14px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .connbar label { color: #fff; font-weight: 600; }
+  .connbar input[type=text] {
+    width: 220px; padding: 4px 6px; border: 1px solid #ccc; border-radius: 3px;
+    font-size: 13px;
+  }
+  .btn {
+    padding: 4px 14px; border: 1px solid #bbb; border-radius: 3px;
+    background: linear-gradient(to bottom, #f5f5f5, #e0e0e0);
+    cursor: pointer; font-size: 13px; white-space: nowrap;
+  }
+  .btn:hover { background: linear-gradient(to bottom, #e8f0fe, #c5cae9); }
+  .btn-primary {
+    background: linear-gradient(to bottom, #1565c0, #0d47a1);
+    color: #fff; border-color: #0a3d91;
+  }
+  .btn-primary:hover { background: linear-gradient(to bottom, #1976d2, #1565c0); }
+  .btn-danger { background: linear-gradient(to bottom, #e53935, #b71c1c); color:#fff; border-color:#7f0000; }
+  .btn-warn   { background: linear-gradient(to bottom, #f57c00, #e65100); color:#fff; border-color:#bf360c; }
+  .badge { width: 12px; height: 12px; border-radius: 50%; display: inline-block; flex-shrink:0; }
+  .badge-local    { background: #808080; }
+  .badge-ok       { background: #27AE60; }
+  .badge-error    { background: #E74C3C; }
+  .badge-label    { color: #fff; font-weight: 600; font-size: 12px; }
+
+  /* ── Tab control ── */
+  .tab-control { display: flex; flex-direction: column; flex: 1; padding: 6px; }
+  .tab-headers { display: flex; border-bottom: 2px solid #1565c0; margin-bottom: 0; }
+  .tab-btn {
+    padding: 7px 22px; cursor: pointer; border: 1px solid transparent;
+    border-bottom: none; border-radius: 3px 3px 0 0; margin-right: 2px;
+    background: #e8e8e8; color: #444; font-size: 13px; font-family: 'Segoe UI', Arial, sans-serif;
+  }
+  .tab-btn.active {
+    background: #fff; border-color: #1565c0; border-bottom-color: #fff;
+    color: #1565c0; font-weight: 600; margin-bottom: -2px; position: relative; z-index:1;
+  }
+  .tab-content { display: none; padding: 10px; overflow-y: auto; max-height: 620px; }
+  .tab-content.active { display: block; }
+
+  /* ── Groups ── */
+  .group {
+    border: 1px solid #bbb; border-radius: 4px; margin-bottom: 10px; padding: 0;
+    position: relative;
+  }
+  .group-header {
+    position: absolute; top: -10px; left: 10px;
+    background: #fff; padding: 0 6px; font-weight: 600; color: #1E3A5F; font-size: 12px;
+  }
+  .group-body { padding: 16px 10px 10px 10px; }
+
+  /* ── Toolbar row ── */
+  .toolbar { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
+  .toolbar label { white-space: nowrap; }
+  .toolbar input[type=text] {
+    padding: 3px 6px; border: 1px solid #bbb; border-radius: 3px; font-size: 13px;
+  }
+  .sep { width: 1px; height: 22px; background: #ccc; margin: 0 4px; }
+
+  /* ── Data grid ── */
+  .datagrid { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  .datagrid th {
+    background: linear-gradient(to bottom, #e8e8e8, #d0d0d0);
+    border: 1px solid #bbb; padding: 5px 8px; text-align: left;
+    font-weight: 600; white-space: nowrap;
+  }
+  .datagrid td { border: 1px solid #ddd; padding: 4px 8px; }
+  .datagrid tr:hover td { background: #e3f2fd !important; }
+  .datagrid tr.selected td { background: #bbdefb !important; }
+  .row-running { background: #D8F3DC; }
+  .row-stopped { background: #FFE0B2; }
+  .row-paused  { background: #FFF9C4; }
+  .row-critical { background: #fde2e2; }
+
+  /* ── Status bar ── */
+  .statusbar {
+    background: #f0f0f0; border-top: 1px solid #ccc;
+    padding: 4px 10px; display: flex; align-items: center;
+    justify-content: space-between; font-size: 12px; color: #444;
+  }
+  .progress-bar-wrap {
+    width: 200px; height: 14px; background: #e0e0e0;
+    border: 1px solid #bbb; border-radius: 2px; overflow: hidden;
+  }
+  .progress-bar-fill { height: 100%; background: #1565c0; transition: width .3s; }
+  .progress-bar-indeterminate {
+    width: 200px; height: 14px; background: #e0e0e0;
+    border: 1px solid #bbb; border-radius: 2px; overflow: hidden; position: relative;
+  }
+  .progress-bar-indeterminate::after {
+    content: ''; position: absolute; top:0; left:-40%;
+    width: 40%; height: 100%; background: #1565c0;
+    animation: indeterminate 1.4s ease-in-out infinite;
+  }
+  @keyframes indeterminate {
+    0%   { left: -40%; }
+    100% { left: 100%; }
+  }
+
+  /* ── Port result ── */
+  .port-result-ok  { color: #27AE60; font-weight: 700; font-size: 14px; margin-top: 4px; }
+  .port-result-err { color: #E74C3C; font-weight: 700; font-size: 14px; margin-top: 4px; }
+
+  /* ── Drive progress ── */
+  .drive-bar-wrap {
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .drive-bar {
+    width: 110px; height: 14px; background: #e0e0e0;
+    border: 1px solid #bbb; border-radius: 2px; overflow: hidden; display: inline-block;
+  }
+  .drive-bar-fill { height: 100%; }
+  .fill-ok   { background: #43a047; }
+  .fill-warn { background: #f9a825; }
+  .fill-crit { background: #e53935; }
+
+  /* ── Annotation callouts ── */
+  .section-label {
+    text-align: center; font-weight: 700; font-size: 15px; color: #1E3A5F;
+    margin: 30px 0 6px;
+    border-bottom: 2px solid #1E3A5F; padding-bottom: 4px;
+  }
+  .note { font-size: 11.5px; color: #555; margin: 4px 0 10px; }
+
+  .page-title {
+    text-align: center; font-size: 20px; font-weight: 700; color: #1E3A5F;
+    margin: 20px 0 4px;
+  }
+  .page-sub {
+    text-align: center; color: #555; font-size: 13px; margin-bottom: 20px;
+  }
+</style>
+</head>
+<body>
+
+<div class="page-title">SysAdmin Troubleshooting Tool — GUI Preview</div>
+<div class="page-sub">PowerShell WPF application · Windows only · Local &amp; remote machine support</div>
+
+<!-- ══════════════════════════════════════════════════════════════════
+     WINDOW 1 — NETWORK TAB
+     ══════════════════════════════════════════════════════════════════ -->
+<div class="section-label">① Network Tab — local machine, idle state</div>
+<p class="note" style="text-align:center">Grey badge = local mode. Each section is independent — run any test without affecting others.</p>
+
+<div class="window">
+  <div class="titlebar">
+    <span>SysAdmin Troubleshooting Tool</span>
+    <span class="titlebar-btns">
+      <span class="tb-min"></span><span class="tb-max"></span><span class="tb-close"></span>
+    </span>
+  </div>
+
+  <div class="connbar">
+    <label>Computer:</label>
+    <input type="text" value="localhost" style="width:190px">
+    <button class="btn btn-primary">Connect</button>
+    <span class="badge badge-local"></span>
+    <span class="badge-label">Local</span>
+  </div>
+
+  <div class="tab-control">
+    <div class="tab-headers">
+      <div class="tab-btn active">Network</div>
+      <div class="tab-btn">Services</div>
+      <div class="tab-btn">Storage</div>
+    </div>
+    <div class="tab-content active">
+
+      <!-- Ping -->
+      <div class="group">
+        <span class="group-header">Ping</span>
+        <div class="group-body">
+          <div class="toolbar">
+            <label>Target:</label>
+            <input type="text" value="8.8.8.8" style="width:240px">
+            <label>Count:</label>
+            <input type="text" value="4" style="width:48px">
+            <button class="btn btn-primary">Ping</button>
+          </div>
+          <table class="datagrid">
+            <tr><th width="46">#</th><th width="190">Address</th><th width="120">Roundtrip (ms)</th><th>Status</th></tr>
+            <tr><td>1</td><td>8.8.8.8</td><td>12</td><td>Success</td></tr>
+            <tr><td>2</td><td>8.8.8.8</td><td>11</td><td>Success</td></tr>
+            <tr><td>3</td><td>8.8.8.8</td><td>13</td><td>Success</td></tr>
+            <tr><td>4</td><td>8.8.8.8</td><td>12</td><td>Success</td></tr>
+          </table>
+        </div>
+      </div>
+
+      <!-- DNS -->
+      <div class="group">
+        <span class="group-header">DNS Lookup</span>
+        <div class="group-body">
+          <div class="toolbar">
+            <label>Name:</label>
+            <input type="text" value="microsoft.com" style="width:240px">
+            <label>Server:</label>
+            <input type="text" value="" placeholder="(default)" style="width:150px">
+            <button class="btn btn-primary">Resolve</button>
+          </div>
+          <table class="datagrid">
+            <tr><th width="200">Name</th><th width="70">Type</th><th>Address</th><th width="70">TTL</th></tr>
+            <tr><td>microsoft.com</td><td>A</td><td>20.112.52.29</td><td>299</td></tr>
+            <tr><td>microsoft.com</td><td>A</td><td>20.81.111.85</td><td>299</td></tr>
+            <tr><td>microsoft.com</td><td>MX</td><td>microsoft-com.mail.protection.outlook.com</td><td>3600</td></tr>
+          </table>
+        </div>
+      </div>
+
+      <!-- Port Test -->
+      <div class="group">
+        <span class="group-header">TCP Port Test</span>
+        <div class="group-body">
+          <div class="toolbar">
+            <label>Host:</label>
+            <input type="text" value="8.8.8.8" style="width:200px">
+            <label>Port:</label>
+            <input type="text" value="443" style="width:64px">
+            <label>Timeout (ms):</label>
+            <input type="text" value="3000" style="width:64px">
+            <button class="btn btn-primary">Test Port</button>
+          </div>
+          <div class="port-result-ok">✔ Open  (14 ms)</div>
+        </div>
+      </div>
+
+      <!-- Traceroute -->
+      <div class="group">
+        <span class="group-header">Traceroute</span>
+        <div class="group-body">
+          <div class="toolbar">
+            <label>Target:</label>
+            <input type="text" value="8.8.8.8" style="width:240px">
+            <button class="btn btn-primary">Trace Route</button>
+          </div>
+          <table class="datagrid">
+            <tr><th width="50">Hop</th><th width="160">Address</th><th width="80">Avg ms</th><th>Hostname</th></tr>
+            <tr><td>1</td><td>192.168.1.1</td><td>2</td><td>router.local</td></tr>
+            <tr><td>2</td><td>10.0.0.1</td><td>8</td><td>isp-gateway.net</td></tr>
+            <tr><td>3</td><td>72.14.215.165</td><td>11</td><td>72.14.215.165</td></tr>
+            <tr><td>4</td><td>8.8.8.8</td><td>13</td><td>dns.google</td></tr>
+          </table>
+        </div>
+      </div>
+
+      <!-- Adapters -->
+      <div class="group">
+        <span class="group-header">Network Adapters</span>
+        <div class="group-body">
+          <div class="toolbar"><button class="btn">Refresh</button></div>
+          <table class="datagrid">
+            <tr><th width="160">Name</th><th width="100">Status</th><th width="130">IPv4</th><th width="80">IPv6</th><th width="140">MAC</th><th>Speed (Mbps)</th></tr>
+            <tr><td>Ethernet 0</td><td>Connected</td><td>192.168.1.50</td><td>fe80::1</td><td>00:1A:2B:3C:4D:5E</td><td>1000</td></tr>
+            <tr><td>Wi-Fi</td><td>Disconnected</td><td></td><td></td><td>A4:C3:F0:85:D6:12</td><td>0</td></tr>
+            <tr><td>Loopback</td><td>Connected</td><td>127.0.0.1</td><td>::1</td><td></td><td>1024</td></tr>
+          </table>
+        </div>
+      </div>
+
+    </div><!-- /tab-content -->
+  </div><!-- /tab-control -->
+
+  <div class="statusbar">
+    <span>Ping complete — 4/4 succeeded.</span>
+    <span></span>
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════════════
+     WINDOW 2 — SERVICES TAB
+     ══════════════════════════════════════════════════════════════════ -->
+<div class="section-label">② Services Tab — connected to remote server SRV01</div>
+<p class="note" style="text-align:center">Green badge = active remote session. Row colors reflect service state. Filter narrows the list in real time.</p>
+
+<div class="window">
+  <div class="titlebar">
+    <span>SysAdmin Troubleshooting Tool</span>
+    <span class="titlebar-btns">
+      <span class="tb-min"></span><span class="tb-max"></span><span class="tb-close"></span>
+    </span>
+  </div>
+
+  <div class="connbar">
+    <label>Computer:</label>
+    <input type="text" value="SRV01" style="width:190px">
+    <button class="btn btn-primary">Connect</button>
+    <span class="badge badge-ok"></span>
+    <span class="badge-label">Connected: SRV01</span>
+  </div>
+
+  <div class="tab-control">
+    <div class="tab-headers">
+      <div class="tab-btn">Network</div>
+      <div class="tab-btn active">Services</div>
+      <div class="tab-btn">Storage</div>
+    </div>
+    <div class="tab-content active">
+      <div class="toolbar">
+        <label>Filter:</label>
+        <input type="text" placeholder="Type to filter by name…" style="width:220px">
+        <button class="btn">Refresh</button>
+        <div class="sep"></div>
+        <button class="btn btn-primary">Start</button>
+        <button class="btn btn-danger">Stop</button>
+        <button class="btn btn-warn">Restart</button>
+      </div>
+      <table class="datagrid">
+        <tr><th width="190">Name</th><th>Display Name</th><th width="100">Status</th><th width="110">Start Type</th><th width="65">PID</th></tr>
+        <tr class="row-running"><td>AudioSrv</td><td>Windows Audio</td><td>Running</td><td>Auto</td><td>1284</td></tr>
+        <tr class="row-running"><td>BITS</td><td>Background Intelligent Transfer Service</td><td>Running</td><td>Auto</td><td>892</td></tr>
+        <tr class="row-stopped"><td>Browser</td><td>Computer Browser</td><td>Stopped</td><td>Manual</td><td>0</td></tr>
+        <tr class="row-running selected"><td>Dnscache</td><td>DNS Client</td><td>Running</td><td>Auto</td><td>1104</td></tr>
+        <tr class="row-stopped"><td>Fax</td><td>Fax</td><td>Stopped</td><td>Manual</td><td>0</td></tr>
+        <tr class="row-running"><td>LanmanServer</td><td>Server</td><td>Running</td><td>Auto</td><td>4</td></tr>
+        <tr class="row-running"><td>LanmanWorkstation</td><td>Workstation</td><td>Running</td><td>Auto</td><td>1248</td></tr>
+        <tr class="row-paused"><td>MSSQL$SQLEXPRESS</td><td>SQL Server (SQLEXPRESS)</td><td>Paused</td><td>Auto</td><td>3412</td></tr>
+        <tr class="row-stopped"><td>RemoteRegistry</td><td>Remote Registry</td><td>Stopped</td><td>Disabled</td><td>0</td></tr>
+        <tr class="row-running"><td>Spooler</td><td>Print Spooler</td><td>Running</td><td>Auto</td><td>2016</td></tr>
+        <tr class="row-running"><td>W32Time</td><td>Windows Time</td><td>Running</td><td>Auto</td><td>1320</td></tr>
+        <tr class="row-stopped"><td>WinRM</td><td>Windows Remote Management</td><td>Stopped</td><td>Manual</td><td>0</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="statusbar">
+    <span>Services loaded — 87 service(s). &nbsp;■ Running &nbsp;■ Stopped &nbsp;■ Paused</span>
+    <span></span>
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════════════
+     WINDOW 3 — STORAGE TAB (with scan in progress)
+     ══════════════════════════════════════════════════════════════════ -->
+<div class="section-label">③ Storage Tab — large file scan in progress</div>
+<p class="note" style="text-align:center">Drive usage shown inline as progress bars. Cancel button appears while scan runs.</p>
+
+<div class="window">
+  <div class="titlebar">
+    <span>SysAdmin Troubleshooting Tool</span>
+    <span class="titlebar-btns">
+      <span class="tb-min"></span><span class="tb-max"></span><span class="tb-close"></span>
+    </span>
+  </div>
+
+  <div class="connbar">
+    <label>Computer:</label>
+    <input type="text" value="localhost" style="width:190px">
+    <button class="btn btn-primary">Connect</button>
+    <span class="badge badge-local"></span>
+    <span class="badge-label">Local</span>
+  </div>
+
+  <div class="tab-control">
+    <div class="tab-headers">
+      <div class="tab-btn">Network</div>
+      <div class="tab-btn">Services</div>
+      <div class="tab-btn active">Storage</div>
+    </div>
+    <div class="tab-content active">
+
+      <!-- Drive Summary -->
+      <div class="group">
+        <span class="group-header">Drive Summary</span>
+        <div class="group-body">
+          <div class="toolbar"><button class="btn">Refresh</button></div>
+          <table class="datagrid">
+            <tr><th width="65">Drive</th><th width="130">Label</th><th width="90">Total GB</th><th width="90">Free GB</th><th width="200">Used %</th></tr>
+            <tr>
+              <td>C:</td><td>System</td><td>476.84</td><td>112.40</td>
+              <td><div class="drive-bar-wrap">
+                <div class="drive-bar"><div class="drive-bar-fill fill-warn" style="width:76%"></div></div>
+                <span>76.4%</span>
+              </div></td>
+            </tr>
+            <tr>
+              <td>D:</td><td>Data</td><td>931.51</td><td>640.22</td>
+              <td><div class="drive-bar-wrap">
+                <div class="drive-bar"><div class="drive-bar-fill fill-ok" style="width:31%"></div></div>
+                <span>31.3%</span>
+              </div></td>
+            </tr>
+            <tr>
+              <td>E:</td><td>Backup</td><td>1862.99</td><td>42.10</td>
+              <td><div class="drive-bar-wrap">
+                <div class="drive-bar"><div class="drive-bar-fill fill-crit" style="width:98%"></div></div>
+                <span>97.7%</span>
+              </div></td>
+            </tr>
+          </table>
+        </div>
+      </div>
+
+      <!-- Large File Finder -->
+      <div class="group">
+        <span class="group-header">Large File Finder</span>
+        <div class="group-body">
+          <div class="toolbar">
+            <label>Path:</label>
+            <input type="text" value="C:\" style="width:260px">
+            <label>Min size (MB):</label>
+            <input type="text" value="100" style="width:60px">
+            <button class="btn btn-danger">Cancel</button>
+            <!-- Scan button hidden while running -->
+          </div>
+          <table class="datagrid">
+            <tr><th>Path</th><th width="100">Size (MB)</th><th width="140">Last Modified</th></tr>
+            <tr><td>C:\Windows\Installer\abc123.msi</td><td>812.40</td><td>2024-11-03 09:12</td></tr>
+            <tr><td>C:\Users\admin\Downloads\VS2022.iso</td><td>750.00</td><td>2025-01-15 14:30</td></tr>
+            <tr><td>C:\Windows\memory.dmp</td><td>512.00</td><td>2025-04-22 03:41</td></tr>
+            <tr><td>C:\hiberfil.sys</td><td>363.10</td><td>2025-05-30 22:18</td></tr>
+            <tr><td>C:\pagefile.sys</td><td>307.20</td><td>2025-05-31 00:00</td></tr>
+          </table>
+        </div>
+      </div>
+
+      <!-- Temp Cleanup -->
+      <div class="group">
+        <span class="group-header">Temp Directory Cleanup</span>
+        <div class="group-body">
+          <div class="toolbar">
+            <button class="btn">Calculate Size</button>
+            <button class="btn btn-danger">Clean Temp Files</button>
+          </div>
+          <table class="datagrid">
+            <tr><th>Directory</th><th width="110">Size (MB)</th><th width="100">File Count</th></tr>
+            <tr><td>C:\Users\admin\AppData\Local\Temp</td><td>1,248.30</td><td>3,421</td></tr>
+            <tr><td>C:\Windows\Temp</td><td>342.10</td><td>891</td></tr>
+          </table>
+        </div>
+      </div>
+
+      <!-- Disk Health -->
+      <div class="group">
+        <span class="group-header">Disk Health</span>
+        <div class="group-body">
+          <div class="toolbar"><button class="btn">Refresh</button></div>
+          <table class="datagrid">
+            <tr><th>Name</th><th width="200">Model</th><th width="90">Size (GB)</th><th width="100">Health</th><th width="120">Operational</th></tr>
+            <tr><td>Samsung SSD 870</td><td>Samsung SSD 870 EVO 500GB</td><td>465.76</td><td>Healthy</td><td>OK</td></tr>
+            <tr><td>WDC WD10EZEX</td><td>WDC WD10EZEX-08WN4A0</td><td>931.51</td><td>Healthy</td><td>OK</td></tr>
+            <tr class="row-critical"><td>Seagate ST2000DM</td><td>Seagate ST2000DM008</td><td>1862.99</td><td>Warning</td><td>Degraded</td></tr>
+          </table>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="statusbar">
+    <span>Scanning 'C:\' for files &gt; 100 MB …</span>
+    <div class="progress-bar-indeterminate"></div>
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════════════
+     WINDOW 4 — PORT CLOSED + FILTERED SERVICES
+     ══════════════════════════════════════════════════════════════════ -->
+<div class="section-label">④ Error states — closed port &amp; filtered service list</div>
+<p class="note" style="text-align:center">Red result for a closed port. Typing "sql" in the Services filter instantly narrows the grid.</p>
+
+<div class="window">
+  <div class="titlebar">
+    <span>SysAdmin Troubleshooting Tool</span>
+    <span class="titlebar-btns">
+      <span class="tb-min"></span><span class="tb-max"></span><span class="tb-close"></span>
+    </span>
+  </div>
+
+  <div class="connbar">
+    <label>Computer:</label>
+    <input type="text" value="SRV01" style="width:190px">
+    <button class="btn btn-primary">Connect</button>
+    <span class="badge badge-ok"></span>
+    <span class="badge-label">Connected: SRV01</span>
+  </div>
+
+  <div class="tab-control">
+    <div class="tab-headers">
+      <div class="tab-btn active">Network</div>
+      <div class="tab-btn">Services</div>
+      <div class="tab-btn">Storage</div>
+    </div>
+    <div class="tab-content active">
+
+      <!-- Port test — closed -->
+      <div class="group">
+        <span class="group-header">TCP Port Test</span>
+        <div class="group-body">
+          <div class="toolbar">
+            <label>Host:</label>
+            <input type="text" value="SRV01" style="width:200px">
+            <label>Port:</label>
+            <input type="text" value="3389" style="width:64px">
+            <label>Timeout (ms):</label>
+            <input type="text" value="3000" style="width:64px">
+            <button class="btn btn-primary">Test Port</button>
+          </div>
+          <div class="port-result-err">✖ Closed / Timed Out  —  Timed out or refused</div>
+        </div>
+      </div>
+
+      <!-- DNS — error row -->
+      <div class="group">
+        <span class="group-header">DNS Lookup</span>
+        <div class="group-body">
+          <div class="toolbar">
+            <label>Name:</label>
+            <input type="text" value="nonexistent.example" style="width:240px">
+            <label>Server:</label>
+            <input type="text" value="" placeholder="(default)" style="width:150px">
+            <button class="btn btn-primary">Resolve</button>
+          </div>
+          <table class="datagrid">
+            <tr><th width="200">Name</th><th width="70">Type</th><th>Address</th><th width="70">TTL</th></tr>
+            <tr class="row-critical"><td>nonexistent.example</td><td>Error</td><td>DNS name does not exist</td><td></td></tr>
+          </table>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Filtered services panel inline -->
+  <div style="padding: 6px 12px; border-top: 1px solid #ddd; background: #fafafa;">
+    <div style="font-weight:600; color:#1E3A5F; margin-bottom:6px;">Services tab with filter "sql" active:</div>
+    <div class="toolbar" style="margin-bottom:6px;">
+      <label>Filter:</label>
+      <input type="text" value="sql" style="width:220px; background:#fffde7; border-color:#f9a825;">
+      <button class="btn">Refresh</button>
+      <div class="sep"></div>
+      <button class="btn btn-primary">Start</button>
+      <button class="btn btn-danger">Stop</button>
+      <button class="btn btn-warn">Restart</button>
+    </div>
+    <table class="datagrid">
+      <tr><th width="190">Name</th><th>Display Name</th><th width="100">Status</th><th width="110">Start Type</th><th width="65">PID</th></tr>
+      <tr class="row-paused"><td>MSSQL$SQLEXPRESS</td><td>SQL Server (SQLEXPRESS)</td><td>Paused</td><td>Auto</td><td>3412</td></tr>
+      <tr class="row-stopped"><td>SQLBrowser</td><td>SQL Server Browser</td><td>Stopped</td><td>Disabled</td><td>0</td></tr>
+      <tr class="row-running"><td>SQLWriter</td><td>SQL Server VSS Writer</td><td>Running</td><td>Auto</td><td>2880</td></tr>
+    </table>
+  </div>
+
+  <div class="statusbar">
+    <span>Port test complete: SRV01 : 3389 &nbsp;|&nbsp; Services filtered — 3 match "sql"</span>
+    <span></span>
+  </div>
+</div>
+
+<div style="text-align:center; color:#888; font-size:11px; margin:20px 0 30px;">
+  Static HTML mockup · Actual WPF app behaviour may differ slightly in font rendering and spacing
+</div>
+
+<script>
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const ctrl = btn.closest('.tab-control');
+      ctrl.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      ctrl.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+      btn.classList.add('active');
+      const idx = [...ctrl.querySelectorAll('.tab-btn')].indexOf(btn);
+      ctrl.querySelectorAll('.tab-content')[idx]?.classList.add('active');
+    });
+  });
+</script>
+</body>
+</html>
