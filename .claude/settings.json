@@ -1,4 +1,5 @@
 {
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "customInstructions": "This project uses the Ruflo plugin ecosystem. For multi-agent tasks use /swarm, for persistent memory use /memory, for neural trading use /neural-trader, for SPARC methodology use /sparc. Prefer concurrent execution for all multi-step operations.",
   "env": {
     "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
@@ -37,18 +38,18 @@
       "Bash(rm -rf /)"
     ]
   },
-  "mcpServers": {
+  "extraKnownMarketplaces": {
     "ruflo": {
-      "command": "npx",
-      "args": ["-y", "ruflo@latest", "mcp", "start"]
-    },
-    "neural-trader": {
-      "command": "npx",
-      "args": ["-y", "neural-trader@latest", "mcp"]
+      "source": {
+        "source": "github",
+        "repo": "ruvnet/ruflo"
+      }
     }
   },
-  "skills": {
-    "source": ".claude/commands",
-    "enabled": true
+  "enabledPlugins": {
+    "ruflo-core@ruflo": true,
+    "ruflo-swarm@ruflo": true,
+    "ruflo-rag-memory@ruflo": true,
+    "ruflo-neural-trader@ruflo": true
   }
 }
