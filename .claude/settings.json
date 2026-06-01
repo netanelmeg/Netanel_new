@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "customInstructions": "This project uses the Ruflo plugin ecosystem. For multi-agent tasks use /swarm, for persistent memory use /memory, for neural trading use /neural-trader, for SPARC methodology use /sparc. Prefer concurrent execution for all multi-step operations.",
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+    "RUFLO_ENABLED": "true"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(npx ruflo*)",
+      "Bash(npx @ruflo/*)",
+      "Bash(npx claude-flow*)",
+      "Bash(npx @claude-flow*)",
+      "Bash(npx neural-trader*)",
+      "Bash(node .claude/*)",
+      "Bash(npm run*)",
+      "Bash(npm test*)",
+      "Bash(git status)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git add*)",
+      "Bash(git commit*)",
+      "Bash(git push*)",
+      "Bash(git branch*)",
+      "Bash(git checkout*)",
+      "Bash(git stash*)",
+      "Bash(git tag*)",
+      "Bash(git config*)",
+      "Bash(jq*)",
+      "Bash(node*)",
+      "Bash(ls*)",
+      "Bash(which*)",
+      "Bash(pwd)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Bash(rm -rf /)"
+    ]
+  },
+  "extraKnownMarketplaces": {
+    "ruflo": {
+      "source": {
+        "source": "github",
+        "repo": "ruvnet/ruflo"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "ruflo-core@ruflo": true,
+    "ruflo-swarm@ruflo": true,
+    "ruflo-rag-memory@ruflo": true,
+    "ruflo-neural-trader@ruflo": true
+  }
+}

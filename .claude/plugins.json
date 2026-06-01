@@ -1,0 +1,30 @@
+{
+  "ruflo-core": {
+    "marketplace": "ruflo",
+    "version": "0.2.2",
+    "description": "Foundation plugin — registers the ruflo MCP server (300+ tools), provides coder/researcher/reviewer agents, and plugin-discovery catalog",
+    "commands": ["ruflo-core", "sparc"],
+    "installedAt": "2026-06-01"
+  },
+  "ruflo-swarm": {
+    "marketplace": "ruflo",
+    "version": "0.2.0",
+    "description": "Agent teams, swarm coordination, Monitor streams, and worktree isolation — 12 MCP tools, 6 topologies",
+    "commands": ["swarm"],
+    "installedAt": "2026-06-01"
+  },
+  "ruflo-rag-memory": {
+    "marketplace": "ruflo",
+    "version": "0.2.0",
+    "description": "RuVector memory with HNSW search, AgentDB, and semantic retrieval — hybrid Graph RAG with MMR diversity",
+    "commands": ["memory"],
+    "installedAt": "2026-06-01"
+  },
+  "ruflo-neural-trader": {
+    "marketplace": "ruflo",
+    "version": "0.2.0",
+    "description": "Neural trading via npx neural-trader — self-learning strategies, Rust/NAPI backtesting, 112+ MCP tools, LSTM/Transformer models",
+    "commands": ["neural-trader"],
+    "installedAt": "2026-06-01"
+  }
+}
