@@ -1,0 +1,9 @@
+{
+  "ruflo": {
+    "source": "ruvnet/ruflo",
+    "registry": "https://github.com/ruvnet/ruflo",
+    "description": "The leading agent meta-harness for Claude — 33 plugins covering swarm orchestration, RAG memory, neural trading, security, and more",
+    "author": "ruvnet",
+    "addedAt": "2026-06-01"
+  }
+}
