@@ -5,3 +5,10 @@ venv/
 .env
 config.yaml
 *.log
+
+# Ruflo runtime files
+.swarm/
+ruvector.db
+*.db
+*.db-shm
+*.db-wal
