@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Azure Hybrid Networking — Interactive Map</title>
+  <link rel="stylesheet" href="../../styles.css">
+</head>
+<body>
+
+<header>
+  <a class="back-link" href="../../index.html">← All topics</a>
+  <h1>Azure hybrid networking — interactive map</h1>
+  <p class="subtitle">Tap any node to explore it · pick a scenario to trace traffic flow</p>
+</header>
+
+<div class="controls" id="controls">
+  <button class="scenario-btn active" data-scenario="explore">🔍 Explore</button>
+  <button class="scenario-btn" data-scenario="spoke-to-spoke">Spoke-A → Spoke-B</button>
+  <button class="scenario-btn" data-scenario="spoke-to-onprem">Spoke-A → On-prem (by IP)</button>
+  <button class="scenario-btn" data-scenario="dns-resolution">DNS: resolve on-prem name</button>
+  <button class="scenario-btn" data-scenario="internet-out">Spoke-A → Internet</button>
+  <button id="quiz-btn" class="scenario-btn" style="margin-left:auto">📝 Quiz</button>
+</div>
+
+<main>
+  <div class="map-container">
+    <div id="map-container"></div>
+  </div>
+  <aside class="panel" id="panel">
+    <span class="tag">START HERE</span>
+    <h2>Welcome 👋</h2>
+    <p>This map shows a complete Azure hybrid networking setup — hub-and-spoke topology connected to on-premises.</p>
+    <p><strong>What to try:</strong></p>
+    <ul>
+      <li><strong>Tap any node</strong> to see what it is, what it does, and common gotchas</li>
+      <li><strong>Pick a scenario</strong> above to watch traffic flow lit up in real time</li>
+    </ul>
+    <div class="tip">💡 Tip: Start with the <strong>"Spoke-A → Spoke-B"</strong> scenario — it reveals the trick that makes hub-and-spoke actually work.</div>
+  </aside>
+</main>
+
+<p class="legend-tiny">v3 interactive · VNet · Subnet · Route Table · NSG · VPN Gateway · BGP · LNG · S2S VPN · Peering · Hub-and-Spoke · Azure Firewall · Private DNS · Conditional Forwarder</p>
+
+<script src="data/nodes.js"></script>
+<script src="data/scenarios.js"></script>
+<script src="data/quiz.js"></script>
+<script src="js/map.js"></script>
+<script src="js/interactions.js"></script>
+<script src="js/quiz.js"></script>
+<script>
+  loadMap('map-container', 'maps/hybrid-networking.svg')
+    .then(svg => {
+      const api = initInteractions(svg);
+      document.getElementById('quiz-btn').addEventListener('click', () => {
+        startQuiz(svg, () => api.renderScenario('explore'), api.setQuizActive);
+      });
+    })
+    .catch(err => {
+      document.getElementById('map-container').innerHTML =
+        '<p style="padding:16px;color:#993C1D">Failed to load map. Make sure you\'re serving the files over HTTP — see the README for instructions.</p>';
+      console.error(err);
+    });
+</script>
+
+</body>
+</html>
