@@ -1,0 +1,21 @@
+# mdconvert optional dependencies.
+#
+# The engine and the text/CSV/TSV/JSON/HTML converters need NOTHING from this
+# list — they run on the Python standard library alone. Install only the
+# extras for the formats you actually use:
+#
+#   pip install -r requirements.txt          # everything below
+#   pip install openpyxl pdfplumber          # just Excel + PDF, etc.
+
+openpyxl>=3.1.0        # .xlsx / .xlsm
+pdfplumber>=0.11.0     # .pdf  (text + tables; preferred)
+pypdf>=4.0.0           # .pdf  (text-only fallback if pdfplumber is absent)
+python-docx>=1.1.0     # .docx
+python-pptx>=0.6.23    # .pptx
+
+# Optional niceties:
+markdownify>=0.11.6    # higher-fidelity HTML -> Markdown (else a built-in fallback is used)
+chardet>=5.2.0         # better encoding detection for legacy text files
+
+# Telegram bot front-end (python -m mdconvert.bot):
+python-telegram-bot>=20.0   # only needed to run the Telegram bot
