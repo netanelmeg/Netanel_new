@@ -7,6 +7,10 @@ encrypted on disk with Windows DPAPI.
 
 **👉 New users: follow the step-by-step [Installation & Configuration Guide](docs/INSTALL.md).**
 
+> **Also in this repo:** [`python/mdconvert`](python/mdconvert/README.md) — a
+> standalone files-to-Markdown converter (PDF, Excel, CSV, Word, PowerPoint,
+> JSON, HTML, text). Run `python -m mdconvert <file-or-folder>`.
+
 ## Screenshots
 
 ### Dashboard
