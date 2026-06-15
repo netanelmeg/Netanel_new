@@ -52,8 +52,8 @@ def _supported_summary() -> str:
 
 
 WELCOME = (
-    "👋 *mdconvert* — send me a file and I'll convert it to Markdown.\n\n"
-    "Send it as a *file/document* (not a compressed photo) and I'll reply with a `.md`.\n\n"
+    "👋 mdconvert — send me a file and I'll convert it to Markdown.\n\n"
+    "Send it as a file/document (not a compressed photo) and I'll reply with a .md.\n\n"
     f"Supported: {_supported_summary()}\n\n"
     "Use /help for details."
 )
@@ -75,7 +75,7 @@ HELP = (
 # --------------------------------------------------------------------------- #
 
 async def cmd_start(update, context) -> None:
-    await update.message.reply_text(WELCOME, parse_mode="Markdown")
+    await update.message.reply_text(WELCOME)
 
 
 async def cmd_help(update, context) -> None:
