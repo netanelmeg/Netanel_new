@@ -97,6 +97,25 @@ Verify a token works without sharing it (returns your bot's info):
 curl -s "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getMe"
 ```
 
+### Run it always-on (Windows)
+
+To keep the bot up across reboots without a terminal open, register it as a
+Scheduled Task with the bundled installer (run from the repo's `windows\`
+folder, in an elevated PowerShell):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File Install-Bot-ScheduledTask.ps1
+```
+
+It prompts for the token (validated via `getMe`), stores it in the user
+environment, and creates a long-running task `MdConvertBot` that starts at boot
+and restarts automatically. Logs go to `%ProgramData%\MdConvertBot\logs\bot.log`.
+
+```powershell
+Start-ScheduledTask -TaskName MdConvertBot           # start now
+Unregister-ScheduledTask -TaskName MdConvertBot -Confirm:$false   # remove
+```
+
 ## Library usage
 
 ```python
