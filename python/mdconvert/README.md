@@ -29,9 +29,26 @@ pip install -r mdconvert/requirements.txt
 pip install openpyxl pdfplumber
 ```
 
+## Install as a command
+
+```bash
+cd python
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e ".[all]"      # adds the `mdconvert` command + every format library
+```
+
+Now `mdconvert` is on PATH (`python -m mdconvert` also works without installing).
+
+## Use it as an agent skill
+
+A shell-capable agent (e.g. a Hermes-style Telegram agent) can use mdconvert as a
+tool: when a user uploads a file, the agent runs `mdconvert "<path>" --stdout` and
+reads the Markdown from stdout. See **[SKILL.md](SKILL.md)** for a ready-to-drop
+skill card and JSON tool spec.
+
 ## CLI usage
 
-Run from the `python/` directory:
+Run from the `python/` directory (or anywhere, once installed):
 
 ```bash
 # One file -> report.md beside it

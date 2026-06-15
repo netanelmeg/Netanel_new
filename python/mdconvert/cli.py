@@ -21,6 +21,7 @@ Examples::
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -148,5 +149,19 @@ def main(argv: list[str] | None = None) -> int:
     return 1 if failures else 0
 
 
+def run(argv: list[str] | None = None) -> int:
+    """Entry point wrapper that exits cleanly when output is piped to a reader
+    that closes early (e.g. ``mdconvert ... | head``)."""
+    try:
+        return main(argv)
+    except BrokenPipeError:
+        # Redirect stdout to devnull so the interpreter's final flush is silent.
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
+        return 0
+    except KeyboardInterrupt:
+        return 130
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(run())

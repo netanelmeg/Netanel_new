@@ -6,6 +6,11 @@ venv/
 config.yaml
 *.log
 
+# Python packaging build artifacts
+*.egg-info/
+build/
+dist/
+
 # Ruflo runtime files
 .swarm/
 ruvector.db
