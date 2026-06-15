@@ -41,10 +41,11 @@ Now `mdconvert` is on PATH (`python -m mdconvert` also works without installing)
 
 ## Use it as an agent skill
 
-A shell-capable agent (e.g. a Hermes-style Telegram agent) can use mdconvert as a
-tool: when a user uploads a file, the agent runs `mdconvert "<path>" --stdout` and
-reads the Markdown from stdout. See **[SKILL.md](SKILL.md)** for a ready-to-drop
-skill card and JSON tool spec.
+A shell-capable agent (e.g. a Hermes Telegram agent) can use mdconvert as a tool:
+when a user uploads a file, the agent runs `mdconvert "<path>" --stdout` and reads
+the Markdown from stdout. **[SKILL.md](SKILL.md)** is a ready-to-use Hermes skill
+(YAML frontmatter + guidance) — copy it into your agent's skills directory as
+`file-to-markdown/SKILL.md`.
 
 ## CLI usage
 

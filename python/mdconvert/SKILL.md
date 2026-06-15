@@ -1,106 +1,105 @@
-# Skill: file_to_markdown
-
-A skill for a shell-command-capable agent (e.g. your Hermes agent). It converts
-an uploaded file to Markdown by shelling out to the `mdconvert` CLI and reading
-the Markdown from **stdout**.
-
-Drop the "Skill card" below into your agent's tool/skill registry (or system
-prompt), adjusting `MDCONVERT` to the absolute path for your install.
-
+---
+name: file-to-markdown
+description: Convert an uploaded or referenced file (PDF, Excel, Word, PowerPoint, CSV, TSV, JSON, HTML, or plain text) to Markdown using the mdconvert CLI. Use whenever a user sends a document and you need its contents — to read, summarize, quote, or extract a table — by running mdconvert on the file path and reading the Markdown from stdout.
+version: 1.0.0
+platforms: [linux, macos, windows]
+metadata:
+  hermes:
+    tags: [files, documents, markdown, conversion, pdf, office, csv]
 ---
 
-## Skill card (give this to the agent)
+# File → Markdown
 
-**Name:** `file_to_markdown`
+Convert a document or data file to Markdown by shelling out to the `mdconvert`
+CLI and reading the result from **stdout**. This is a single-command tool, not a
+multi-step playbook: when you have a file path and need its content, run one
+command.
 
-**Description:** Convert a document or data file to Markdown. Supports PDF,
-Excel (.xlsx/.xlsm), Word (.docx), PowerPoint (.pptx), CSV, TSV, JSON, HTML, and
-plain text/Markdown. Use it whenever the user uploads/sends a file and wants its
-contents read, summarized, quoted, or converted to Markdown.
+## When to use
 
-**When to use:**
-- The user sends a document (PDF, spreadsheet, Word/PowerPoint, CSV, …) and asks
-  what's in it, to summarize it, extract a table, or "convert to markdown".
-- You need the textual content of an uploaded file before reasoning about it.
+- A user uploads or sends a document (PDF, spreadsheet, Word, PowerPoint, CSV, …)
+  and asks what's in it, to summarize it, pull a table, or "convert to markdown."
+- You need the textual content of a file before reasoning about, quoting, or
+  transforming it.
+- A task hands you a file path and the next step needs its text.
 
-**Command to run:**
+If the input is already plain text you can read directly, you don't need this.
+
+## The command
+
 ```bash
-MDCONVERT "<ABSOLUTE_FILE_PATH>" --stdout
+mdconvert "<ABSOLUTE_FILE_PATH>" --stdout
 ```
-where `MDCONVERT` is the installed command, e.g.
-`~/Netanel_new/python/.venv/bin/mdconvert`
-(or `~/Netanel_new/python/.venv/bin/python -m mdconvert`).
 
-**Input:** the absolute path to the file the user uploaded (your framework
-usually saves it to a temp path — pass that path).
+`mdconvert` is the installed command. On this machine it is:
 
-**Output contract:**
-- On success: exit code `0`, the **Markdown is printed to stdout**. Read stdout.
-- On failure: non-zero exit code, an error message on **stderr** (e.g. a missing
-  optional library, or invalid file). Informational notes/warnings also go to
-  stderr, so stdout is always clean Markdown.
+```
+~/Netanel_new/python/.venv/bin/mdconvert
+```
 
-**Useful flags:**
-- `--stdout` — print Markdown instead of writing a `.md` file (use this).
+(equivalently `~/Netanel_new/python/.venv/bin/python -m mdconvert`). Pass the
+absolute path the upload was saved to.
+
+## Output contract
+
+- **Success:** exit code `0`; the **Markdown is printed to stdout** — read stdout.
+- **Failure:** non-zero exit code; a human-readable reason on **stderr** (most
+  often a missing optional library, e.g. `Reading .pdf requires 'pdfplumber' —
+  pip install pdfplumber`, or an unreadable/corrupt file).
+- Informational notes/warnings always go to **stderr**, so **stdout is always
+  clean Markdown**. Capture stdout; don't merge stderr into it.
+
+## Supported inputs
+
+| Works with no extra libraries | Needs a library (`pip install -e ".[all]"`) |
+|---|---|
+| `.txt` `.md` `.log`, `.csv` `.tsv`, `.json`, `.html`/`.htm` | `.pdf`, `.xlsx`/`.xlsm`, `.docx`, `.pptx` |
+
+Unknown extensions are read as plain text (with a note on stderr). Run
+`mdconvert --list-formats` to see the live list.
+
+## Useful flags
+
+- `--stdout` — print Markdown instead of writing a `.md` file. **Always use this**
+  when you want the text back in-band.
 - `--no-header` — treat the first CSV/Excel row as data, not a header.
 - `--front-matter` — prepend a YAML front-matter block (title/source/date).
-- `--list-formats` — print the supported extensions.
+- `--list-formats` — print every supported extension.
 
-**Examples:**
+## Examples
+
 ```bash
 # Read an uploaded PDF
-~/Netanel_new/python/.venv/bin/mdconvert "/tmp/uploads/report.pdf" --stdout
+mdconvert "/tmp/uploads/contract.pdf" --stdout
 
-# Turn a spreadsheet into Markdown tables (one per sheet)
-~/Netanel_new/python/.venv/bin/mdconvert "/tmp/uploads/data.xlsx" --stdout
+# A spreadsheet → one Markdown table per sheet
+mdconvert "/tmp/uploads/q3.xlsx" --stdout
 
-# A CSV whose first row is data, not a header
-~/Netanel_new/python/.venv/bin/mdconvert "/tmp/uploads/rows.csv" --stdout --no-header
+# A headerless CSV
+mdconvert "/tmp/uploads/rows.csv" --stdout --no-header
 ```
 
----
+## Pitfalls
 
-## JSON tool spec (if your agent registers tools with a schema)
-
-```json
-{
-  "name": "file_to_markdown",
-  "description": "Convert an uploaded file (PDF, Excel, Word, PowerPoint, CSV, TSV, JSON, HTML, or text) to Markdown. Returns the Markdown text.",
-  "parameters": {
-    "type": "object",
-    "properties": {
-      "path": {
-        "type": "string",
-        "description": "Absolute path to the file to convert."
-      },
-      "no_header": {
-        "type": "boolean",
-        "description": "Treat the first CSV/Excel row as data instead of a header.",
-        "default": false
-      }
-    },
-    "required": ["path"]
-  }
-}
-```
-
-A handler for the above just runs the command and returns stdout:
-```bash
-mdconvert "$path" --stdout            # + --no-header when no_header is true
-```
-
----
+- **Don't write a temp `.md` then read it.** Pass `--stdout` and read stdout
+  directly — one command, no cleanup.
+- **Capture stdout, not stderr.** Notes/warnings on stderr are not part of the
+  Markdown; mixing them corrupts the output.
+- **A non-zero exit with a "pip install X" message** means that format's library
+  isn't installed. Install it once (see setup below) rather than retrying.
+- **Use an absolute path.** Relative paths depend on the worker's cwd.
+- **Large files:** conversion is local and fast, but very large PDFs/workbooks
+  take proportional time — prefer running this in a worker, not a latency-
+  sensitive path.
 
 ## One-time setup (per machine running the agent)
 
 ```bash
 cd ~/Netanel_new/python
 python3 -m venv .venv && source .venv/bin/activate
-pip install -e ".[all]"     # installs the `mdconvert` command + every format library
-# (or `pip install -e ".[office,pdf]"` for just the formats you need)
+pip install -e ".[all]"   # installs the `mdconvert` command + every format library
 ```
 
-After this, `~/Netanel_new/python/.venv/bin/mdconvert` is the command the agent
-calls. Text/CSV/TSV/JSON/HTML work even without the `[all]` extras; PDF and
-Office formats need their libraries, and `mdconvert` will say exactly which one
-to `pip install` if it's missing.
+Text/CSV/TSV/JSON/HTML work even without the `[all]` extras; PDF and Office
+formats need their libraries, and `mdconvert` names the exact one to install if
+it's missing.
