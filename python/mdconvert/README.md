@@ -65,6 +65,38 @@ python -m mdconvert --list-formats
 
 Exit codes: `0` success · `1` one or more files failed · `2` nothing to do.
 
+## Telegram bot
+
+Send the bot a file (as a *document*) and it replies with the converted `.md`.
+It uses long polling, so it works from your laptop or the on-prem server with
+no public URL or webhook.
+
+```bash
+cd python
+pip install "python-telegram-bot>=20"
+# plus any format extras you need, e.g. openpyxl pdfplumber python-docx python-pptx
+
+export TELEGRAM_BOT_TOKEN="123456:ABC-DEF..."   # from @BotFather
+#   Windows PowerShell:  $env:TELEGRAM_BOT_TOKEN = "123456:ABC-DEF..."
+#   Windows cmd:         set TELEGRAM_BOT_TOKEN=123456:ABC-DEF...
+
+python -m mdconvert.bot
+```
+
+Then open Telegram, message your bot, and send it a file. Notes:
+
+- **Send the file as a document**, not a compressed photo, so the bytes arrive intact.
+- Telegram limits bot downloads to **20 MB** per file.
+- PDF/Excel/Word/PowerPoint conversion needs the matching library installed on
+  the machine running the bot (see [requirements](requirements.txt)); the bot
+  replies with a clear message if one is missing.
+
+Verify a token works without sharing it (returns your bot's info):
+
+```bash
+curl -s "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getMe"
+```
+
 ## Library usage
 
 ```python

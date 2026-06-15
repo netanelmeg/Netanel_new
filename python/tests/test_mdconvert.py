@@ -210,6 +210,52 @@ class OptionalDependencyTests(TempDirTest):
         self._maybe("pptx", "deck.pptx")
 
 
+class ConvertBytesTests(unittest.TestCase):
+    def test_csv_bytes(self):
+        result = mdconvert.convert_bytes("data.csv", b"a,b\n1,2\n")
+        self.assertIn("| a", result.markdown)
+        self.assertEqual(result.source.name, "data.csv")
+
+    def test_extension_drives_handler(self):
+        # Same bytes, but the .json extension routes to the JSON handler.
+        result = mdconvert.convert_bytes("x.json", b'{"a": 1}')
+        self.assertIn("```json", result.markdown)
+
+    def test_front_matter_uses_real_name(self):
+        result = mdconvert.convert_bytes(
+            "Report.txt", b"hi", ConvertOptions(front_matter=True)
+        )
+        self.assertIn('title: "Report"', result.markdown)
+
+
+class BotModuleTests(unittest.TestCase):
+    """The bot module must import without python-telegram-bot installed."""
+
+    def test_import_and_metadata(self):
+        from mdconvert import bot
+        self.assertIn(".pdf", bot.WELCOME)  # welcome text lists supported formats
+        self.assertTrue(callable(bot.main))
+        self.assertTrue(callable(bot.on_document))
+
+    def test_main_without_token_returns_2(self):
+        import os
+        from mdconvert import bot
+        saved = os.environ.pop("TELEGRAM_BOT_TOKEN", None)
+        try:
+            self.assertEqual(bot.main(), 2)
+        finally:
+            if saved is not None:
+                os.environ["TELEGRAM_BOT_TOKEN"] = saved
+
+    def test_build_application_without_library_raises(self):
+        import importlib.util
+        if importlib.util.find_spec("telegram") is not None:
+            self.skipTest("python-telegram-bot is installed")
+        from mdconvert import bot
+        with self.assertRaises(SystemExit):
+            bot.build_application("dummy-token")
+
+
 class CliTests(TempDirTest):
     def test_cli_converts_files(self):
         self.write("a.csv", "x,y\n1,2\n")

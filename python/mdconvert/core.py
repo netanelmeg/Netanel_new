@@ -13,6 +13,7 @@ raise :class:`ConversionError` with a "pip install ..." hint.
 from __future__ import annotations
 
 import datetime as _dt
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Sequence, Union
@@ -23,6 +24,7 @@ __all__ = [
     "ConversionResult",
     "register",
     "convert_file",
+    "convert_bytes",
     "convert_to_file",
     "supported_extensions",
     "is_supported",
@@ -150,6 +152,28 @@ def convert_file(
         result.markdown += "\n"
     if options.front_matter:
         result.markdown = _front_matter(path) + result.markdown
+    return result
+
+
+def convert_bytes(
+    filename: str,
+    data: bytes,
+    options: ConvertOptions | None = None,
+) -> ConversionResult:
+    """Convert in-memory file ``data`` (named ``filename``) to Markdown.
+
+    This is the entry point for front-ends that receive an upload as bytes
+    (a Telegram document, an HTTP file upload, ...). The original ``filename``
+    is preserved so the correct handler is chosen by extension and so any
+    front-matter/title reflects the real name. Returns a
+    :class:`ConversionResult` whose ``source`` is ``filename``.
+    """
+    base = Path(filename).name or "upload"
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_path = Path(tmp_dir) / base
+        tmp_path.write_bytes(data)
+        result = convert_file(tmp_path, options)
+    result.source = Path(filename)
     return result
 
 
