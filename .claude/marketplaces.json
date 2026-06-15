@@ -5,5 +5,12 @@
     "description": "The leading agent meta-harness for Claude — 33 plugins covering swarm orchestration, RAG memory, neural trading, security, and more",
     "author": "ruvnet",
     "addedAt": "2026-06-01"
+  },
+  "claude-plugins-official": {
+    "source": "obra/superpowers",
+    "registry": "https://claude.com/plugins/superpowers",
+    "description": "Anthropic's official Claude Code plugin marketplace",
+    "author": "Anthropic",
+    "addedAt": "2026-06-15"
   }
 }
