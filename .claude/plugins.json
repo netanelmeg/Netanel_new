@@ -26,5 +26,13 @@
     "description": "Neural trading via npx neural-trader — self-learning strategies, Rust/NAPI backtesting, 112+ MCP tools, LSTM/Transformer models",
     "commands": ["neural-trader"],
     "installedAt": "2026-06-01"
+  },
+  "superpowers": {
+    "marketplace": "claude-plugins-official",
+    "version": "5.1.0",
+    "description": "Core skills library for Claude Code: TDD, debugging, collaboration patterns, and proven techniques. Activates via SessionStart hook + Skill tool (no slash commands).",
+    "commands": [],
+    "skills": ["using-superpowers", "brainstorming", "writing-plans", "executing-plans", "subagent-driven-development", "test-driven-development", "systematic-debugging", "verification-before-completion", "requesting-code-review", "receiving-code-review", "dispatching-parallel-agents", "using-git-worktrees", "finishing-a-development-branch", "writing-skills"],
+    "installedAt": "2026-06-15"
   }
 }
