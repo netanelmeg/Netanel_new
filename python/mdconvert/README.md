@@ -97,6 +97,27 @@ Verify a token works without sharing it (returns your bot's info):
 curl -s "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getMe"
 ```
 
+### One-shot install (Linux / WSL)
+
+From the repo's `linux/` folder:
+
+```bash
+./install-bot.sh
+```
+
+It creates a venv, installs `python-telegram-bot` (+ optional format libraries),
+prompts for and validates your token, and — if your WSL has systemd — installs a
+`mdconvert-bot` user service that auto-restarts and survives reboots. Without
+systemd it prints how to run it manually or via Windows Task Scheduler
+(`wsl.exe -- ~/.config/mdconvert/run-bot.sh`). Re-run any time; it's idempotent.
+
+```bash
+./install-bot.sh --token "123:ABC..."   # non-interactive
+./install-bot.sh --no-extras            # skip PDF/Excel/Word/PowerPoint libs
+systemctl --user status mdconvert-bot   # if installed as a service
+journalctl --user -u mdconvert-bot -f   # follow the logs
+```
+
 ### Run it always-on (Windows)
 
 To keep the bot up across reboots without a terminal open, register it as a
