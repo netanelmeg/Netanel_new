@@ -275,6 +275,18 @@ class CliTests(TempDirTest):
         self.assertEqual(rc, 0)
         self.assertTrue((outdir / "nested" / "deep.md").exists())
 
+    def test_cli_max_chars_truncates(self):
+        import contextlib
+        import io
+        self.write("big.txt", "x" * 5000)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = cli.main([str(self.tmp / "big.txt"), "--stdout", "--max-chars", "100", "-q"])
+        out = buf.getvalue()
+        self.assertEqual(rc, 0)
+        self.assertIn("truncated", out)
+        self.assertLess(len(out), 400)
+
     def test_cli_no_inputs_returns_2(self):
         self.assertEqual(cli.main([]), 2)
 

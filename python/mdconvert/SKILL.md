@@ -62,9 +62,27 @@ Unknown extensions are read as plain text (with a note on stderr). Run
 
 - `--stdout` — print Markdown instead of writing a `.md` file. **Always use this**
   when you want the text back in-band.
+- `--max-chars N` — cap the output at N characters (adds a truncation marker).
+  Use this on small/local models so a big document doesn't overflow the context
+  window.
 - `--no-header` — treat the first CSV/Excel row as data, not a header.
 - `--front-matter` — prepend a YAML front-matter block (title/source/date).
 - `--list-formats` — print every supported extension.
+
+## Small or local models
+
+This skill is model-agnostic — it works with any agent that can run a shell
+command, including a **local model** (e.g. Gemma via Ollama). On a small local
+model with a limited context window, cap the output so a large file doesn't blow
+the budget:
+
+```bash
+mdconvert "<path>" --stdout --max-chars 8000
+```
+
+Pick N to fit the model's context (≈ 8000 chars ≈ 2–3k tokens, safe for an
+8k-context model). If the marker says the output was truncated and you need more,
+re-run with a larger `--max-chars` or without it.
 
 ## Examples
 

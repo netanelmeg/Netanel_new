@@ -47,6 +47,10 @@ the Markdown from stdout. **[SKILL.md](SKILL.md)** is a ready-to-use Hermes skil
 (YAML frontmatter + guidance) — copy it into your agent's skills directory as
 `file-to-markdown/SKILL.md`.
 
+Works with a **local model** too (no cloud, no rate limits): see
+[docs/LOCAL_GEMMA_AGENT.md](../../docs/LOCAL_GEMMA_AGENT.md) for running it with a
+local Gemma model via Ollama. Use `--max-chars` to fit small context windows.
+
 ## CLI usage
 
 Run from the `python/` directory (or anywhere, once installed):
@@ -75,6 +79,7 @@ python -m mdconvert --list-formats
 | `-o, --output-dir DIR` | Write `.md` files into `DIR` (mirrors folder structure for directory inputs). |
 | `-r, --recursive` | Recurse into input directories. |
 | `--stdout` | Print Markdown to stdout instead of writing files. |
+| `--max-chars N` | Truncate output to N characters (0 = unlimited) — useful for small/local model context windows. |
 | `--no-header` | Treat the first CSV/TSV/sheet row as data, not a header. |
 | `--front-matter` | Prepend a YAML front-matter block (`title`, `source`, `converted`). |
 | `--no-page-breaks` | Omit `## Page N` / `## Slide N` separators. |

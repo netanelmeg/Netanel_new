@@ -80,6 +80,9 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Omit '## Page N' / '## Slide N' separators.")
     parser.add_argument("--overwrite", action="store_true",
                         help="Overwrite existing .md files (default: skip them).")
+    parser.add_argument("--max-chars", type=int, default=0, metavar="N",
+                        help="Truncate output to N characters (0 = unlimited). Handy for "
+                             "small/local model context windows.")
     parser.add_argument("--list-formats", action="store_true",
                         help="List supported file extensions and exit.")
     parser.add_argument("-q", "--quiet", action="store_true", help="Only print errors.")
@@ -125,6 +128,17 @@ def main(argv: list[str] | None = None) -> int:
         for warning in result.warnings:
             if not args.quiet:
                 print(f"note: {source.name}: {warning}", file=sys.stderr)
+
+        if args.max_chars and len(result.markdown) > args.max_chars:
+            total = len(result.markdown)
+            result.markdown = (
+                result.markdown[: args.max_chars].rstrip()
+                + f"\n\n> …truncated: showing {args.max_chars} of {total} characters. "
+                  "Re-run without --max-chars for the full document.\n"
+            )
+            if not args.quiet:
+                print(f"note: {source.name}: output truncated to {args.max_chars}/{total} chars",
+                      file=sys.stderr)
 
         if args.stdout:
             sys.stdout.write(result.markdown)
